@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; media-src 'self' blob: data: http://127.0.0.1:*; connect-src 'self' data: blob: http://127.0.0.1:* ws://127.0.0.1:*; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'" />
+  <title>大肥鱼</title>
+  <style>
+    :root {
+      --bg: rgba(24, 26, 36, .92);
+      --card: rgba(255, 255, 255, .045);
+      --card-2: rgba(255, 255, 255, .075);
+      --line: rgba(255, 255, 255, .08);
+      --txt: #EDEFF7;
+      --dim: #8C93A8;
+      --pink: #FF8FBB;
+      --blue: #8FB8FF;
+      --green: #6EE7A8;
+      --orange: #FFC062;
+      --purple: #B0A8FF;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+      color: var(--txt);
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+    }
+
+    #panel {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      padding: 0 12px 10px;
+      border-radius: 18px;
+      background:
+        radial-gradient(120% 90% at 12% -10%, rgba(255, 143, 187, .16), transparent 55%),
+        radial-gradient(100% 80% at 100% 0%, rgba(143, 184, 255, .13), transparent 50%),
+        linear-gradient(165deg, rgba(34, 37, 50, .96), rgba(17, 19, 26, .94));
+      border: 1px solid rgba(255, 255, 255, .09);
+      box-shadow: 0 22px 60px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(255, 255, 255, .07);
+      backdrop-filter: blur(30px) saturate(1.7);
+      opacity: 0;
+      /* 只淡入，不做位移/缩放：透明窗口上 backdrop-filter 跟着 transform 走时，
+         Chromium 会把模糊层按窗口矩形留在原位，顶上露出一块方角残影。 */
+      transition: opacity .18s ease;
+      overflow: hidden;
+    }
+
+    #panel.show {
+      opacity: 1;
+    }
+
+    /* ---------- 标题栏（拖动把手） ---------- */
+    .head {
+      -webkit-app-region: drag;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 46px;
+      flex: 0 0 46px;
+      padding: 0 2px;
+    }
+
+    .head b {
+      font-size: 13.5px;
+      letter-spacing: .5px;
+      font-weight: 600;
+    }
+
+    .mood {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      height: 20px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 10.5px;
+      font-style: normal;
+      background: rgba(120, 170, 255, .16);
+      color: #9DC2FF;
+      transition: background .3s, color .3s;
+      white-space: nowrap;
+    }
+
+    .mood::before {
+      content: "";
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 6px currentColor;
+    }
+
+    .mood.happy {
+      background: rgba(255, 105, 160, .18);
+      color: #FF8FBB;
+    }
+
+    .mood.hungry {
+      background: rgba(255, 159, 10, .18);
+      color: #FFC062;
+    }
+
+    .mood.sleepy {
+      background: rgba(150, 140, 255, .16);
+      color: #B0A8FF;
+    }
+
+    .mood.pout {
+      background: rgba(255, 90, 90, .16);
+      color: #FF8E8E;
+    }
+
+    .mood.shy {
+      background: rgba(255, 160, 200, .16);
+      color: #FFB4D2;
+    }
+
+    .days {
+      margin-left: auto;
+      font-size: 10.5px;
+      color: var(--dim);
+      white-space: nowrap;
+    }
+
+    .close {
+      -webkit-app-region: no-drag;
+      width: 24px;
+      height: 24px;
+      margin-left: 4px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      color: var(--dim);
+      transition: background .15s, color .15s;
+    }
+
+    .close:hover {
+      background: rgba(255, 90, 90, .18);
+      color: #FF8E8E;
+    }
+
+    .close svg {
+      width: 11px;
+      height: 11px;
+    }
+
+    /* ---------- 进行中 / 当前状态 ---------- */
+    .hero {
+      /* 高度交给内容自己长：固定 96px 时「说明两行 + 闲着」会把最后一行顶出
+         圆角被 overflow 切掉（2026-11-08 主人截图里就是缺了半行字）。 */
+      flex: 0 0 auto;
+      min-height: 96px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 9px 12px;
+      border-radius: 14px;
+      background: linear-gradient(140deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, .028));
+      border: 1px solid var(--line);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -30px;
+      top: -40px;
+      width: 110px;
+      height: 110px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(255, 143, 187, .16), transparent 70%);
+      pointer-events: none;
+    }
+
+    .ring {
+      --p: 0;
+      --c: rgba(255, 255, 255, .2);
+      position: relative;
+      width: 74px;
+      height: 74px;
+      flex: 0 0 74px;
+      border-radius: 50%;
+      background: conic-gradient(var(--c) calc(var(--p) * 1%), rgba(255, 255, 255, .07) 0);
+      display: grid;
+      place-items: center;
+      transition: background .3s linear;
+    }
+
+    .ring::before {
+      content: "";
+      position: absolute;
+      inset: 4px;
+      border-radius: 50%;
+      background: #20222E;
+      box-shadow: inset 0 1px 6px rgba(0, 0, 0, .5);
+    }
+
+    /* 闲着：一圈很淡的粉，缓慢呼吸。 */
+    .ring.idle {
+      animation: ringPulse 4.6s ease-in-out infinite;
+    }
+
+    @keyframes ringPulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255, 143, 187, 0); }
+      50% { box-shadow: 0 0 20px 0 rgba(255, 143, 187, .16); }
+    }
+
+    .ring .emo {
+      position: relative;
+      font-size: 30px;
+      line-height: 1;
+      filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .35));
+    }
+
+    .hinfo {
+      min-width: 0;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .hinfo .t1 {
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .hinfo .t2 {
+      font-size: 10.5px;
+      color: var(--dim);
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .hinfo .t3 {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 1px;
+    }
+
+    .left {
+      font-variant-numeric: tabular-nums;
+      font-size: 12.5px;
+      color: var(--pink);
+      letter-spacing: .5px;
+    }
+
+    .left.idle {
+      color: var(--dim);
+      font-size: 11px;
+    }
+
+    .stop {
+      margin-left: auto;
+      height: 24px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 8px;
+      background: rgba(255, 90, 90, .16);
+      color: #FF9C9C;
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+      display: none;
+      transition: background .15s, transform .1s;
+    }
+
+    .stop:hover {
+      background: rgba(255, 90, 90, .28);
+    }
+
+    .stop:active {
+      transform: scale(.96);
+    }
+
+    .stop.on {
+      display: block;
+    }
+
+    /* ---------- 四维状态 ---------- */
+    .stats {
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .stat {
+      padding: 6px 9px 5px;
+      border-radius: 11px;
+      background: var(--card);
+      border: 1px solid rgba(255, 255, 255, .05);
+    }
+
+    .stat .row {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+      margin-bottom: 4px;
+    }
+
+    .stat .ico {
+      font-size: 11px;
+    }
+
+    .stat .nm {
+      font-size: 10.5px;
+      color: var(--dim);
+    }
+
+    .stat em {
+      margin-left: auto;
+      font-style: normal;
+      font-size: 11.5px;
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      transition: color .3s;
+    }
+
+    .stat em.up {
+      color: var(--green);
+    }
+
+    .stat em.down {
+      color: #FF9F0A;
+    }
+
+    .bar {
+      height: 4px;
+      border-radius: 99px;
+      background: rgba(255, 255, 255, .07);
+      overflow: hidden;
+    }
+
+    .bar i {
+      display: block;
+      height: 100%;
+      width: 0;
+      border-radius: 99px;
+      transition: width .45s cubic-bezier(.2, .8, .3, 1), background .3s;
+    }
+
+    .bar.hunger i {
+      background: linear-gradient(90deg, #FFB26B, #FF8F6B);
+    }
+
+    .bar.favor i {
+      background: linear-gradient(90deg, #FF8FBB, #C77DFF);
+    }
+
+    .bar.energy i {
+      background: linear-gradient(90deg, #6EE7A8, #4FC3F7);
+    }
+
+    .bar.clean i {
+      background: linear-gradient(90deg, #8FB8FF, #B0A8FF);
+    }
+
+    .bar.low i {
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: .45
+      }
+    }
+
+    /* ---------- 分区标题 ---------- */
+    .sec {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 7px 0 5px;
+      font-size: 10.5px;
+      color: var(--dim);
+      letter-spacing: .6px;
+    }
+
+    .sec::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(255, 255, 255, .08), transparent);
+    }
+
+    .sec b {
+      color: var(--txt);
+      font-weight: 600;
+      font-size: 11px;
+      letter-spacing: .3px;
+    }
+
+    /* ---------- 活动卡片 ---------- */
+    .acts {
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+
+    .act {
+      position: relative;
+      height: 50px;
+      padding: 4px 4px 3px;
+      border-radius: 11px;
+      border: 1px solid rgba(255, 255, 255, .07);
+      background: linear-gradient(160deg, rgba(255, 255, 255, .06), rgba(255, 255, 255, .022));
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1px;
+      cursor: pointer;
+      overflow: hidden;
+      transition: background .15s, border-color .2s, transform .12s, opacity .2s;
+    }
+
+    .act:hover {
+      background: linear-gradient(160deg, rgba(255, 255, 255, .11), rgba(255, 255, 255, .04));
+      border-color: rgba(255, 143, 187, .35);
+    }
+
+    .act:active {
+      transform: scale(.96);
+    }
+
+    .act .e {
+      font-size: 16px;
+      line-height: 1.1;
+    }
+
+    .act .n {
+      font-size: 9.5px;
+      color: #D7DBE8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+
+    .act .d {
+      font-size: 8px;
+      color: #6F7689;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .act.busy {
+      opacity: .38;
+      cursor: not-allowed;
+    }
+
+    .act.busy .d {
+      color: #FFC062;
+    }
+
+    .act.locked {
+      opacity: .3;
+      cursor: not-allowed;
+    }
+
+    .act.active {
+      border-color: rgba(255, 143, 187, .65);
+      background: linear-gradient(160deg, rgba(255, 143, 187, .2), rgba(255, 143, 187, .05));
+      box-shadow: 0 0 0 1px rgba(255, 143, 187, .18), 0 6px 18px rgba(255, 143, 187, .12);
+      opacity: 1;
+    }
+
+    .act .dot {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--pink);
+      box-shadow: 0 0 6px var(--pink);
+      display: none;
+      animation: blink 1.4s ease-in-out infinite;
+    }
+
+    .act.active .dot {
+      display: block;
+    }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: .25
+      }
+    }
+
+    /* ---------- 食盆 ---------- */
+    .foods {
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+
+    .food {
+      position: relative;
+      height: 42px;
+      padding: 4px 3px 3px;
+      border-radius: 11px;
+      border: 1px solid rgba(255, 255, 255, .07);
+      background: linear-gradient(160deg, rgba(255, 255, 255, .06), rgba(255, 255, 255, .022));
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1px;
+      cursor: pointer;
+      overflow: hidden;
+      transition: background .15s, border-color .2s, transform .12s;
+    }
+
+    .food:hover {
+      background: linear-gradient(160deg, rgba(255, 255, 255, .11), rgba(255, 255, 255, .04));
+      border-color: rgba(255, 176, 107, .4);
+    }
+
+    .food:active {
+      transform: scale(.96);
+    }
+
+    .food .e {
+      font-size: 14px;
+      line-height: 1.1;
+    }
+
+    .food .n {
+      font-size: 9.5px;
+      color: #D7DBE8;
+      white-space: nowrap;
+    }
+
+    .food .v {
+      font-size: 8px;
+      color: #6F7689;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .food.cool {
+      opacity: .38;
+      cursor: not-allowed;
+    }
+
+    .food.cool::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      height: 2px;
+      width: calc(var(--cool, 0) * 1%);
+      background: var(--orange);
+      opacity: .85;
+    }
+
+    /* ---------- 互动 ---------- */
+    .pets {
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .pbtn {
+      position: relative;
+      height: 32px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, .07);
+      background: linear-gradient(160deg, rgba(255, 255, 255, .06), rgba(255, 255, 255, .02));
+      color: var(--txt);
+      font-family: inherit;
+      font-size: 11.5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      cursor: pointer;
+      overflow: hidden;
+      transition: background .15s, border-color .2s, transform .12s;
+    }
+
+    .pbtn:hover {
+      background: linear-gradient(160deg, rgba(143, 184, 255, .16), rgba(255, 255, 255, .04));
+      border-color: rgba(143, 184, 255, .35);
+    }
+
+    .pbtn:active {
+      transform: scale(.975);
+    }
+
+    .pbtn.cool {
+      opacity: .4;
+      cursor: not-allowed;
+    }
+
+    .pbtn.cool::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      height: 2px;
+      width: calc(var(--cool, 0) * 1%);
+      background: var(--blue);
+    }
+
+    /* ---------- 提示行 + 页脚 ---------- */
+    #say {
+      flex: 0 0 14px;
+      margin-top: 4px;
+      height: 14px;
+      font-size: 10.5px;
+      color: #C9CEDD;
+      opacity: 0;
+      transform: translateY(3px);
+      transition: opacity .18s, transform .18s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #say.on {
+      opacity: 1;
+      transform: none;
+    }
+
+    /* 最近活动：弹性吃掉按钮和页脚之间的空白，最多两行。 */
+    .recent {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      gap: 4px;
+      padding-top: 3px;
+      overflow: hidden;
+    }
+
+    .recent .it {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 9px;
+      background: rgba(255, 255, 255, .035);
+      border: 1px solid rgba(255, 255, 255, .04);
+      font-size: 10.5px;
+      color: var(--dim);
+      animation: recentIn .22s ease both;
+    }
+
+    @keyframes recentIn {
+      from { opacity: 0; transform: translateY(3px); }
+      to { opacity: 1; transform: none; }
+    }
+
+    .recent .it b {
+      color: var(--txt);
+      font-weight: 600;
+      font-size: 11px;
+    }
+
+    .recent .it .tag {
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 5px;
+      background: rgba(255, 159, 10, .14);
+      color: #FFC062;
+    }
+
+    .recent .it em {
+      margin-left: auto;
+      font-style: normal;
+      font-size: 10px;
+      color: #6F7689;
+    }
+
+    .recent .none {
+      padding: 2px 2px 5px;
+      font-size: 10px;
+      color: #6F7689;
+      text-align: center;
+    }
+
+    .foot {
+      flex: 0 0 auto;
+      margin-top: auto;
+      padding-top: 4px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 9.5px;
+      color: #6F7689;
+      border-top: 1px solid rgba(255, 255, 255, .05);
+    }
+
+    .foot span {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .foot .sp {
+      flex: 1;
+    }
+
+    .foot .last {
+      max-width: 150px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #7D8497;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="panel">
+    <div class="head">
+      <b>大肥鱼</b>
+      <span class="mood calm" id="mood">平静</span>
+      <span class="days" id="days">第 1 天</span>
+      <div class="close" id="close" title="收起来">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <path d="M2 2l8 8M10 2l-8 8" />
+        </svg>
+      </div>
+    </div>
+
+    <div class="hero">
+      <div class="ring" id="ring"><span class="emo" id="heroEmo">🐟</span></div>
+      <div class="hinfo">
+        <div class="t1" id="heroName">在发呆</div>
+        <div class="t2" id="heroDesc">戳一下下面的活动，我就动起来。</div>
+        <div class="t3">
+          <span class="left idle" id="heroLeft">闲着</span>
+          <button class="stop" id="stop">终止</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="row"><span class="ico">🍙</span><span class="nm">饱腹</span><em id="hungerTxt">72</em></div>
+        <div class="bar hunger" id="hungerBarWrap"><i id="hungerBar"></i></div>
+      </div>
+      <div class="stat">
+        <div class="row"><span class="ico">💗</span><span class="nm">好感</span><em id="favorTxt">12</em></div>
+        <div class="bar favor"><i id="favorBar"></i></div>
+      </div>
+      <div class="stat">
+        <div class="row"><span class="ico">⚡</span><span class="nm">精力</span><em id="energyTxt">78</em></div>
+        <div class="bar energy"><i id="energyBar"></i></div>
+      </div>
+      <div class="stat">
+        <div class="row"><span class="ico">🫧</span><span class="nm">清洁</span><em id="cleanTxt">82</em></div>
+        <div class="bar clean"><i id="cleanBar"></i></div>
+      </div>
+    </div>
+
+    <div class="sec"><b>做点什么</b><span>点一下就开始，随时能停</span></div>
+    <div class="acts" id="acts"></div>
+
+    <div class="sec"><b>喂点东西</b><span id="foodHint">想吃就点</span></div>
+    <div class="foods" id="foods"></div>
+
+    <div class="sec"><b>陪陪她</b></div>
+    <div class="pets">
+      <button class="pbtn" id="touch">🫳 摸摸头</button>
+      <button class="pbtn" id="play">🎾 陪她玩</button>
+    </div>
+
+    <!-- 最近做过什么：吃掉 720 高度里那段空白，也给「她今天干了啥」一个交代 -->
+    <div class="recent" id="recent"></div>
+
+    <div id="say"></div>
+
+    <div class="foot">
+      <span id="fFed">喂了 0</span>
+      <span id="fPlay">玩了 0</span>
+      <span id="fPet">摸了 0</span>
+      <span class="sp"></span>
+      <span class="last" id="fLast">还没有活动记录</span>
+    </div>
+  </div>
+
+  <script src="pet.js"></script>
+  <script src="petpanel-win.js"></script>
+</body>
+
+</html>
