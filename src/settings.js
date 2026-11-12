@@ -38,6 +38,7 @@ const DEFAULTS = {
   // 当前用哪个模型包（src/packs 的包 id）。空 = 用第一个内置包。
   activePack: "",
   resolution: 2, // 1 | 2 | 3 超采样倍数
+  fpsCap: 30, // 60 | 30 | 15 —— 她动起来的帧率上限；空闲时还会再降到 15
   // 说话的声音…空…?= 用引擎自己的默认（晓萱）…?
   voiceId: "",
   // 语音缓存 / 识别模型放哪。空 = 系统用户目录（userData）。
@@ -116,6 +117,7 @@ const RANGES = {
   scale: [0.5, 2],
   opacity: [0.3, 1],
   resolution: [1, 3],
+  fpsCap: [15, 60],
   offsetRight: [-2000, 4000],
   offsetBottom: [-2000, 4000],
   // RVC 变调：正数升调，负数降调。…?2 丢…个八度，超出就没法听了…?

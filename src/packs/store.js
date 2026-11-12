@@ -19,6 +19,14 @@ const M = require("./manifest");
 const { probe } = require("./probe");
 const { extractZip, isZipFile } = require("./zip");
 
+// 用户输入问题（选错目录、不是 zip、包里没模型）统一带 400：
+// 前端和日志能分清「用户点错了」和「服务真的炸了」。
+function badRequest(message) {
+  const e = new Error(message);
+  e.statusCode = 400;
+  return e;
+}
+
 const LIMITS = {
   files: 4000,
   totalBytes: 1.2 * 1024 * 1024 * 1024,   // 模型体积本来就大，给 1.2G 上限
@@ -244,7 +252,7 @@ class PackStore {
   }
 
   write(id, manifest) {
-    if (!M.ID_RE.test(String(id || ""))) throw new Error("非法 id");
+    if (!M.ID_RE.test(String(id || ""))) throw badRequest("非法 id");
     if (!this.userDir) throw new Error("没有配置用户模型目录");
     const dir = path.join(this.userDir, id);
     if (!isDir(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -262,12 +270,12 @@ class PackStore {
   // 从外部目录导入。返回 {id, dir, report, manifest, skipped}
   importDir(srcDir, opts) {
     const o = opts || {};
-    if (!isDir(srcDir)) throw new Error("源目录不存在");
+    if (!isDir(srcDir)) throw badRequest("源目录不存在");
     if (!this.userDir) throw new Error("没有配置用户模型目录");
     fs.mkdirSync(this.userDir, { recursive: true });
 
     const model3 = o.model3 || this.findModel3(srcDir);
-    if (!model3) throw new Error("这个目录里找不到 .model3.json —— 请选择包含模型文件的文件夹");
+    if (!model3) throw badRequest("这个目录里找不到 .model3.json —— 请选择包含模型文件的文件夹");
 
     // id 优先用用户选的那个文件夹/压缩包内层目录名：
     // 很多模型的文件就叫 model.model3.json，用它当 id 会得到一串「model」「model-2」。
@@ -337,14 +345,19 @@ class PackStore {
   // 这里解到临时目录 → 自动剥掉「只有一个壳目录」的常见结构 → 走正常导入 → 清临时目录。
   importArchive(zipPath, opts) {
     const o = Object.assign({}, opts || {});
-    if (!isZipFile(zipPath)) throw new Error("这不是 ZIP 压缩包（只支持 .zip）");
+    if (!isZipFile(zipPath)) throw badRequest("这不是 ZIP 压缩包（只支持 .zip）");
     if (!this.userDir) throw new Error("没有配置用户模型目录");
     const st = fs.statSync(zipPath);
-    if (st.size > 900 * 1024 * 1024) throw new Error("压缩包超过 900MB，建议解压后导入文件夹");
+    if (st.size > 900 * 1024 * 1024) throw badRequest("压缩包超过 900MB，建议解压后导入文件夹");
 
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dafeiyu-pack-"));
     try {
-      const zs = extractZip(zipPath, tmp);
+      let zs;
+      try {
+        zs = extractZip(zipPath, tmp);
+      } catch (e) {
+        throw badRequest("压缩包解不开：" + String(e && e.message || e));
+      }
       // 常见结构一：zip 里直接就是模型文件
       // 常见结构二：zip 里只有一层文件夹，模型在那层里
       let src = tmp;
@@ -356,7 +369,7 @@ class PackStore {
         }
       }
       if (!this.findModel3(src)) {
-        throw new Error("压缩包里找不到 .model3.json —— 请确认下的是 Live2D 模型包，不是安装程序或预览图");
+        throw badRequest("压缩包里找不到 .model3.json —— 请确认下的是 Live2D 模型包，不是安装程序或预览图");
       }
       if (!o.displayName && !o.name) {
         // 用压缩包文件名当显示名：用户下载时命名的那个词通常就是他认识的模型名

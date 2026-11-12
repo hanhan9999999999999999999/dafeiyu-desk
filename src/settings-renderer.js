@@ -10,6 +10,7 @@ const els = {
   opacityNum: document.getElementById("opacityNum"),
   opacityApply: document.getElementById("opacityApply"),
   resSeg: document.getElementById("resSeg"),
+  fpsSeg: document.getElementById("fpsSeg"),
   sharpen: document.getElementById("sharpen"),
   viewState: document.getElementById("viewState"),
   openAdapter: document.getElementById("openAdapter"),
@@ -471,6 +472,13 @@ function paint(s) {
     const el = els[key];
     if (el) el.classList.toggle("on", s[key] === true);
   }
+
+  if (els.fpsSeg) {
+    for (const b of els.fpsSeg.children) {
+      b.classList.toggle("on", Number(b.dataset.v) === Number(s.fpsCap || 30));
+    }
+  }
+
   paintView();
   paintHotkeys(s);
 }
@@ -1257,6 +1265,13 @@ els.resSeg.addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
   push({ resolution: Number(b.dataset.v) });
+});
+
+// ---- 帧率上限 ----
+els.fpsSeg.addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  push({ fpsCap: Number(b.dataset.v) });
 });
 
 // ---- 开关 ----

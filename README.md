@@ -31,7 +31,7 @@
 
 | 分类 | 能力 |
 |---|---|
-| 渲染 | Live2D Cubism 3 / 4；贴图按需缩到 2048 再上 GPU（8192 原图也不爆显存）；透明窗口 + 逐像素穿透；DPI 自适应（≤2×）；空闲自动降帧降分辨率；锐化开关 |
+| 渲染 | Live2D Cubism 3 / 4；贴图按需缩到 2048 再上 GPU（8192 原图也不爆显存）；透明窗口 + 逐像素穿透；DPI 自适应（≤2×）；帧率上限 60 / 30 / 15（默认 30，空闲自动降到 15）；空闲自动降分辨率；锐化开关 |
 | 模型 | 任意模型接入：12 个参数语义槽 / 27 个场景动作槽 / 7 个表情槽；zip 直投、文件夹导入、拖拽导入；未声明动作与表情自动收录；素材库逐条试播（动作 + 未声明表情都能放）；动作文件引擎；16 项手感；取景框（拖拽 / 滚轮 / 主窗口视图 / 推荐取景） |
 | 语音 | 麦克风 VAD 自动断句；ASR（whisper.cpp / 系统语音）；四套输出引擎任选：飞鱼 TTS、XTTS-v2、RVC 变声（ONNX + DirectML，N/A 卡与核显都能跑）、Edge TTS 兜底；逐段流式播放、可打断；引擎空闲 10 分钟自动卸载，进程也跟着退 |
 | 对话 | DSH 桥接（本机或局域网）或任意 OpenAI 兼容 API；气泡多行自适应；失败不静默 |
@@ -200,11 +200,11 @@ zip 直接拖进窗口，或点「导入压缩包」；解包、剥壳、找 `mo
 
 | 文件 | 大小 | SHA-256 |
 |---|---|---|
-| [dafeiyu-1.1.3-setup.exe](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/download/v1.1.3/dafeiyu-1.1.3-setup.exe) | 940,097,859 B（≈ 896.5 MB） | `994958b8dfe3fcec622ec44f0204b6e4296e2a968939b5e221f18bce10569af9` |
+| [dafeiyu-1.1.4-setup.exe](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/download/v1.1.4/dafeiyu-1.1.4-setup.exe) | 940,098,817 B（≈ 896.5 MB） | `8fd71f111315ef2e6c1d350428ec19ed9c20218c0daa880f623180501f440c7a` |
 
-页面版入口：[Releases · v1.1.2](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/tag/v1.1.3)。
+页面版入口：[Releases · v1.1.4](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/tag/v1.1.4)。
 
-1. 下载上面的 `dafeiyu-1.1.3-setup.exe`（约 900 MB，含离线语音与变声环境）。
+1. 下载上面的 `dafeiyu-1.1.4-setup.exe`（约 900 MB，含离线语音与变声环境）。
 2. 双击安装。程序未做代码签名，SmartScreen 会提示「未知发布者」——这是当前版本的已知限制，不是文件损坏。
 3. 第一次打开会引导导入模型：选一个 `.zip`，或选解压后的模型文件夹。
 4. 右键她和托盘图标都能进设置。
@@ -212,14 +212,14 @@ zip 直接拖进窗口，或点「导入压缩包」；解包、剥壳、找 `mo
 校验下载是否完整（PowerShell）：
 
 ```powershell
-Get-FileHash .\dafeiyu-1.1.3-setup.exe -Algorithm SHA256
+Get-FileHash .\dafeiyu-1.1.4-setup.exe -Algorithm SHA256
 # 应输出 27738B16...DA9E9
 ```
 
 静默安装：
 
 ```
-dafeiyu-1.1.3-setup.exe /S /D=D:\Apps\Dafeiyu
+dafeiyu-1.1.4-setup.exe /S /D=D:\Apps\Dafeiyu
 ```
 
 > 升级安装会保留 `%APPDATA%\dafeiyu-desk` 里的设置与已导入的模型。

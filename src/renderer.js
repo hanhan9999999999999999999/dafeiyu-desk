@@ -296,6 +296,8 @@
   // 运行期开关（设置面板能改，改了立刻生效）
   let sharpenOn = true;
   let baseResolution = 2;
+  // 帧率上限：60 最顺、30 省一半 CPU、15 最省电。空闲时再自动降到 15。
+  let fpsCap = 30;
   let followCursor = true;
   let autoIdle = true;
   let blinkEnabled = true;
@@ -548,6 +550,17 @@
     startModelIdle();
 
     app.ticker.add(tick);
+
+  // 自检出口：出问题时让用户/支持直接读一眼帧率、分辨率、空闲时长，不用开 DevTools。
+  // 只暴露只读数字，不给外部改状态的能力。
+  window.__fishDebug = () => ({
+    fps: app && app.ticker ? Math.round(app.ticker.FPS) : -1,
+    maxFps: app && app.ticker ? app.ticker.maxFPS : -1,
+    res: app && app.renderer ? app.renderer.resolution : -1,
+    idleMs: Date.now() - lastMoveAt,
+    phase,
+    model: !!(model && model.visible),
+  });
     window.addEventListener("resize", layout);
   };
 
@@ -1285,9 +1298,10 @@
     const calm = !dragging && !working && idleFor > 8000;
     tick._n = (tick._n || 0) + 1;
     tick._calm = calm;
-    const wantFps = calm ? 30 : 60;
+    const wantFps = calm ? Math.min(15, fpsCap) : fpsCap;
     if (app.ticker.maxFPS !== wantFps) app.ticker.maxFPS = wantFps;
     tick._ran = (tick._ran || 0) + 1;
+    const _t0 = performance.now();
 
     // 空闲降分辨率…?x…?1x。像素少四…渲染弢…锢…跟着掉…?
     // 有人碰她（calm…?false）立刻升回设置里的档位，扢…以看得出来的时…永远是清晰的…?
@@ -1795,6 +1809,8 @@
     if (app && app.canvas) {
       app.canvas.style.filter = sharpenOn ? "url(#fish-sharpen)" : "none";
     }
+
+    fpsCap = Math.max(15, Math.min(60, Number(s.fpsCap) || 30));
 
     const wantRes = Number(s.resolution) || 1;
     if (app && app.renderer.resolution !== wantRes) {
