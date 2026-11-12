@@ -52,7 +52,7 @@
 
 ### 设置中心 · 外观
 
-大小、不透明度、清晰度、锐化；取景一行显示当前范围，点「调整取景…」直接跳到适配器的取景步骤——取景只有这一个入口，不再有第二个地方各存一份。
+大小、不透明度、清晰度、锐化；取景一行只读显示当前范围（到腰 / 头到胸…），要改就去适配器的取景步骤——取景只有那一个入口，不再有第二个地方各存一份。
 
 ![设置中心 · 外观](docs/screenshots/settings-appearance.png)
 
@@ -184,15 +184,30 @@ zip 直接拖进窗口，或点「导入压缩包」；解包、剥壳、找 `mo
 
 ## 安装
 
-1. 到 [Releases](../../releases) 下载 `大肥鱼-1.1.1-安装包.exe`（约 900 MB，含离线语音与变声环境）。
+### 下载
+
+| 文件 | 大小 | SHA-256 |
+|---|---|---|
+| [dafeiyu-1.1.1-setup.exe](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/download/v1.1.1/dafeiyu-1.1.1-setup.exe) | 940,087,810 B（≈ 896.5 MB） | `ca07f8c94de0a03e989cabf2c52727a009fef24f171b474f836969813caf1887` |
+
+页面版入口：[Releases · v1.1.1](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/tag/v1.1.1)。
+
+1. 下载上面的 `dafeiyu-1.1.1-setup.exe`（约 900 MB，含离线语音与变声环境）。
 2. 双击安装。程序未做代码签名，SmartScreen 会提示「未知发布者」——这是当前版本的已知限制，不是文件损坏。
 3. 第一次打开会引导导入模型：选一个 `.zip`，或选解压后的模型文件夹。
 4. 右键她和托盘图标都能进设置。
 
+校验下载是否完整（PowerShell）：
+
+```powershell
+Get-FileHash .\dafeiyu-1.1.1-setup.exe -Algorithm SHA256
+# 应输出 CA07F8C9...C1887
+```
+
 静默安装：
 
 ```
-大肥鱼-1.1.1-安装包.exe /S /D=D:\Apps\Dafeiyu
+dafeiyu-1.1.1-setup.exe /S /D=D:\Apps\Dafeiyu
 ```
 
 > 升级安装会保留 `%APPDATA%\dafeiyu-desk` 里的设置与已导入的模型。
