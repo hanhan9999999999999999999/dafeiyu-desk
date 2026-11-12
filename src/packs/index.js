@@ -104,6 +104,13 @@ class ModelAdapter {
   activate(id) {
     const rec = this.store.read(id);
     if (!rec) throw new Error("模型包不存在：" + id);
+    // 只有配置、没有模型文件的包（升级后留下的孤儿覆盖层）先单独拦一道：
+    // 否则体检只会报「缺 5 个参数没绑」，用户会以为是自己没适配对，实际是文件没了。
+    if (rec.missingModel) {
+      const err = new Error("这个模型包缺模型文件（只剩配置，没有 .moc3 / 贴图）— 重新导入完整模型后再应用");
+      err.code = "PACK_MISSING_MODEL";
+      throw err;
+    }
     // 切之前先体检：模型文件/贴图缺失这类包切过去是「桌宠直接消失」，
     // 用户只看到人不见了，不知道发生了什么。闸门放在这里，IPC 和 HTTP 两条路都拦得住。
     const d = this.diagnose(id);
@@ -390,12 +397,16 @@ class ModelAdapter {
     const r = this._resolve(id);
     if (!r) return null;
     const ruleIssues = this.rules.validateAll(r.ctx);
-    const doc = diagnose({ manifest: r.rec.manifest, report: r.report, builtin: r.builtin, ruleIssues, cfgs: r.cfgs });
+    const doc = diagnose({
+      manifest: r.rec.manifest, report: r.report, builtin: r.builtin, ruleIssues, cfgs: r.cfgs,
+      missingModel: !!r.rec.missingModel,
+    });
     return {
       id: r.rec.manifest.id,
       origin: r.rec.origin,
       writable: true,
       readonlyModel: !r.rec.writable,
+      missingModel: !!r.rec.missingModel,
       dir: r.rec.dir,
       manifest: r.rec.manifest,
       report: r.report,
@@ -418,6 +429,7 @@ class ModelAdapter {
     return diagnose({
       manifest: r.rec.manifest, report: r.report, builtin: r.builtin,
       ruleIssues: this.rules.validateAll(r.ctx), cfgs: r.cfgs,
+      missingModel: !!r.rec.missingModel,
     });
   }
 

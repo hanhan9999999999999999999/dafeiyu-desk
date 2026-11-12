@@ -107,7 +107,8 @@
       if (p.origin === "user") nm.appendChild(el("span", "tag user", "自建"));
       // 内置模型被改过（用户在本机存了一份覆盖配置），要说清楚它和内带的那个是同一只。
       if (p.origin === "override") nm.appendChild(el("span", "tag override", "本机配置"));
-      const idl = el("div", "id", p.id + (p.ok === false ? " · 打不开" : ""));
+      if (p.missingModel) nm.appendChild(el("span", "tag bad", "缺模型文件"));
+      const idl = el("div", "id", p.id + (p.missingModel ? " · 需要重新导入" : (p.ok === false ? " · 打不开" : "")));
       meta.appendChild(nm);
       meta.appendChild(idl);
       row.appendChild(thumb);
@@ -280,8 +281,25 @@
       renderDiag(r.diagnose);
       renderBar(r);
       renderBadge(r);
+      if (r.missingModel) {
+        // 只剩配置的包（升级后残留的覆盖层）：没有任何东西可预览，
+        // 也不能保存/应用 —— 先把「为什么不行」写在预览区，别让用户对着黑屏猜。
+        $("formState").textContent = "缺模型文件";
+        setChrome(false);
+        $("btnSave").disabled = true;
+        $("btnApply").disabled = true;
+        $("btnApply").textContent = "设为当前模型";
+        renderBadge({});
+        if (S.app) { try { S.app.canvas.style.display = "none"; } catch (e) { } }
+        if (S.boxEl) S.boxEl.style.display = "none";
+        if (S.model) { try { S.model.destroy({ texture: false, baseTexture: false }); } catch (e) { } S.model = null; }
+        $("hint").style.display = "";
+        $("hint").textContent = "这个包只剩配置，没有 .moc3 / 贴图 —— 重新导入完整模型后才能应用";
+        return;
+      }
       $("btnSave").disabled = false;
       $("btnApply").disabled = false;
+      $("btnApply").textContent = "设为当前模型";
       await loadPreview(r);
     } catch (e) {
       if (seq !== selectSeq) return;
@@ -358,6 +376,8 @@
   async function loadPreview(doc) {
     if (!vendor) { $("hint").textContent = "Live2D 引擎没加载上"; return; }
     $("hint").style.display = "none";
+    if (S.app) { try { S.app.canvas.style.display = ""; } catch (e) { } }
+    if (S.boxEl) S.boxEl.style.display = "";
     const url = (doc.manifest && doc.manifest.live2d && doc.manifest.live2d.model)
       ? "/packs/" + doc.id + "/" + doc.manifest.live2d.model
       : "";
@@ -587,6 +607,8 @@
 
   // ── 动作测试条 ────────────────────────────────────────────
   function renderBadge(doc) {
+    // 每次都要先清空：换包时上一只模型的贴图/参数数不清掉，会让人以为这包真有那些文件。
+    badgeEl.innerHTML = "";
     const rep = (doc && doc.report) || {};
     const bits = [
       ["贴图", (rep.textures || []).length],
@@ -1559,7 +1581,10 @@
   // 来回开几次显存就上去了（任务管理器里表现为 Electron GPU 进程一路涨）。
   window.addEventListener("beforeunload", () => {
     try {
-      if (S.app) S.app.destroy(true, { children: true, texture: true, textureSource: true });
+      // 贴图由 Pixi 的 Assets 托管，这里显式 destroy 会触发
+      // "[Assets] A Texture managed by Assets was destroyed instead of unloaded" 警告。
+      // 页面马上就要销毁，GPU 资源会随 WebGL context 一起回收，交给渲染器即可。
+      if (S.app) S.app.destroy(true, { children: true, texture: false, textureSource: false });
     } catch (e) { }
     S.model = null;
     S.app = null;

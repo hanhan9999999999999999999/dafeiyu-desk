@@ -116,6 +116,7 @@ const els = {
   seeInterval: document.getElementById("seeInterval"),
   seeGap: document.getElementById("seeGap"),
   seeSpeak: document.getElementById("seeSpeak"),
+  voiceWarm: document.getElementById("voiceWarm"),
   seeTest: document.getElementById("seeTest"),
   seeResult: document.getElementById("seeResult"),
 };
@@ -383,6 +384,7 @@ function paint(s) {
   if (els.seeInterval) els.seeInterval.value = String(s.seeInterval == null ? 1.6 : s.seeInterval);
   if (els.seeGap) els.seeGap.value = String(s.seeGap == null ? 7 : s.seeGap);
   if (els.seeSpeak) els.seeSpeak.classList.toggle("on", s.seeSpeak !== false);
+  if (els.voiceWarm) els.voiceWarm.classList.toggle("on", s.voiceWarm === true);
   // 看屏幕：默认程序自带（不填接口），只有填了地址才算「外部接口」
   if (els.seeModeSeg) {
     const useApi = !!String(s.seeBase || "").trim();
@@ -596,6 +598,10 @@ for (const [el, key, lo, hi, dflt] of [
 
 if (els.seeSpeak) {
   els.seeSpeak.addEventListener("click", () => push({ seeSpeak: !(cur && cur.seeSpeak !== false) }));
+}
+
+if (els.voiceWarm) {
+  els.voiceWarm.addEventListener("click", () => push({ voiceWarm: !(cur && cur.voiceWarm === true) }));
 }
 
 if (els.seeTest) {

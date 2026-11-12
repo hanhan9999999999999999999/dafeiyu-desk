@@ -748,6 +748,21 @@ let BASE = "http://127.0.0.1:8898";
   // 选飞鱼时先在后台把模型装进显存：否则第一句要等 17-22 秒。
   // 10 分钟内只催一次，设置变更会重复调到 setVoiceOut。
   let warmAt = 0, warming = false, warmTries = 0;
+  // 「启动就预热」是可选开关：飞鱼模型装进显存大约 8GB，默认不预热更省内存，
+  // 代价是闲置 10 分钟后的第一句话要等引擎重新装模型。想追求第一句速度的用户可以在设置里打开。
+  let warmEnabled = false;
+  function setWarm(on) {
+    const next = !!on;
+    if (next === warmEnabled) { if (next && voiceOut === "feiyu") warmFeiyu(); return; }
+    warmEnabled = next;
+    if (warmEnabled) {
+      if (voiceOut === "feiyu") warmFeiyu();
+    } else if (warmAt) {
+      // 关掉预热：马上把已经装进显存的模型还回去，不然用户以为开关没生效。
+      fetch("/engine/unload", { method: "POST" }).catch(() => { });
+      warmAt = 0;
+    }
+  }
   function warmFeiyu() {
     if (warming || Date.now() - warmAt < 600000) return;
     warming = true;
@@ -772,7 +787,7 @@ let BASE = "http://127.0.0.1:8898";
     // 保留完整的四档，别把 feiyu/xtts 折成 tts —— speak() 要靠它决定
     // 走哪条链路（飞鱼有专门的流式接口，绕开会白等整段合成）。
     voiceOut = (v === "rvc" || v === "feiyu" || v === "xtts") ? v : "tts";
-    if (voiceOut === "feiyu") warmFeiyu();
+    if (voiceOut === "feiyu" && warmEnabled) warmFeiyu();
     const p = Number(pitch);
     rvcPitch = Number.isFinite(p) ? Math.max(-12, Math.min(12, Math.round(p))) : 0;
   }
@@ -1532,6 +1547,9 @@ let BASE = "http://127.0.0.1:8898";
     toggle,
     setVoiceId,
     setVoiceOut,
+    setWarm,
+    // 按需预热：用户点开输入条、按下说话时提前装模型，不必等第一句话才付这 20 秒。
+    warm: () => { if (voiceOut === "feiyu") warmFeiyu(); },
     // 只出声、不走对话：验证「语音输出」这条路（TTS / RVC）时用。
     // say() 会先发消息再等回复，测声音不需要这么重。
     speak: (text) => speak(text),

@@ -104,6 +104,22 @@ function startServer(opts) {
         return;
       }
 
+      // 反向开关：用户把「启动时预热」关掉时立刻还内存。
+      if (url === "/engine/unload" && req.method === "POST") {
+        (async () => {
+          try {
+            const f = await engines.feiyu();
+            if (f && f.release) f.release();
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+            res.end(JSON.stringify({ ok: true }));
+          } catch (e) {
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: String(e && e.message || e) }));
+          }
+        })();
+        return;
+      }
+
       if (url === "/engine/tts" && req.method === "POST") {
         (async () => {
           try {

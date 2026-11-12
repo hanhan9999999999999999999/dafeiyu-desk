@@ -209,6 +209,8 @@
     if (desk && typeof desk.onSummon === "function") {
       desk.onSummon(() => {
         setOpen(true);
+        // 叫出输入条 = 马上要说话：这时预热语音引擎不用等到第一句才付装载时间。
+        try { if (window.FishVoice && window.FishVoice.warm) window.FishVoice.warm(); } catch (e) { }
         requestAnimationFrame(() => requestAnimationFrame(() => {
           try { input.focus(); } catch (e) { }
         }));

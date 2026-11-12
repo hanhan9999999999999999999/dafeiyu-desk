@@ -372,3 +372,23 @@ export function stop() {
   }
   ready = false;
 }
+
+/**
+ * 立刻还内存：用户把「启动时预热」关掉时调用。
+ * 先让 Python 释放模型，再收掉进程 —— 只 /unload 的话 torch 缓存分配器还占着好几 GB。
+ */
+export function release() {
+  if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+  // 端口上可能跑着「别人的」飞鱼服务（比如另一个程序先占了 8895）：
+  // 这种情况下 child 是空的，但模型确实被我们预热进了那个进程，仍然要发 /unload 把显存还掉。
+  fetch(`${BASE}/unload`, { method: 'POST' }).catch(() => {});
+  ready = false;
+  if (!child) return;
+  // 自己拉起来的进程才由我们收掉；别人的进程只卸载模型，不动它。
+  setTimeout(() => {
+    if (!child) return;
+    try { child.kill(); } catch {}
+    child = null;
+    log('按设置释放语音引擎进程');
+  }, 1200).unref?.();
+}

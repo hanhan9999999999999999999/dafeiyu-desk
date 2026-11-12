@@ -69,6 +69,9 @@ const DEFAULTS = {
   // 其余三档：「tts」最快最稳（Edge 晓萱）；「rvc」先 TTS 再换嗓子（慢，要装 Python）；
   // 「xtts」直接从参考音频克隆（RTX 4060 上约 1 秒一句，首次启用要等 60 秒加载模型）。
   voiceOut: "feiyu",
+  // 启动即预热飞鱼：默认关。模型约 8GB 显存/内存，开机就装进去对只偶尔说话的人不划算；
+  // 打开后第一句更快，关掉时首次说话要等引擎装载。
+  voiceWarm: false,
   rvcPython: "",
   rvcModel: "models/warma/Warma-03.onnx",
   rvcDevice: "dml",

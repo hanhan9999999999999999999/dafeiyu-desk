@@ -224,6 +224,9 @@ class PackStore {
         dir: rec.dir,
         model: m.live2d.model,
         renderer: m.renderer,
+        // 列表里就要标出「缺模型文件」：用户升级后留下的孤儿覆盖层光看名字看不出来，
+        // 点进去才发现不能应用，会以为是适配器坏了。
+        missingModel: !!rec.missingModel,
         ok: v.ok,
         issues: v.issues,
       });

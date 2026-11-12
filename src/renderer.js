@@ -407,7 +407,9 @@
       console.log("[fish] 模型包 " + PACK.id + " · " + (PACK.displayName || "") + " · 贴图 " + TEXTURE_COUNT + " 张");
     }
     vendor.extensions.add(vendor.Live2DPlugin);
-    vendor.configureCubismSDK({ memorySizeMB: 256 });
+    // Cubism Core 的 WASM 堆：这套模型 509 个参数、5 张贴图，128MB 足够；
+    // 256MB 会白白多占一百多兆（这块算在渲染进程的工作集里，用户看到的就是「桌宠怎么这么大」）。
+    vendor.configureCubismSDK({ memorySizeMB: 128 });
 
     app = new vendor.Application();
     await app.init({
@@ -1682,6 +1684,8 @@
   if (window.deskfish.onMicToggle) {
     window.deskfish.onMicToggle(() => {
       try {
+        // 按说话就是「马上要用语音」的信号：此时预热比开机预热更划算（不用语音的人不必付内存）。
+        if (window.FishVoice && window.FishVoice.warm) window.FishVoice.warm();
         if (window.FishVoice && window.FishVoice.toggle) window.FishVoice.toggle();
       } catch (e) { }
     });
@@ -1768,7 +1772,7 @@
     // 这里只保留「保存过适配器配置」的轻量重排，避免别的设置一改就把布局抖一下。
 
     try { if (s && window.FishVoice && window.FishVoice.setDevice) window.FishVoice.setDevice(s.micDevice || ""); } catch (e) { }
-    try { if (s && window.FishVoice) { if (window.FishVoice.setVoiceId) window.FishVoice.setVoiceId(s.voiceId || ""); if (window.FishVoice.setVoiceOut) window.FishVoice.setVoiceOut(s.voiceOut || "tts", s.rvcPitch || 0); } } catch (e) { }
+    try { if (s && window.FishVoice) { if (window.FishVoice.setWarm) window.FishVoice.setWarm(s.voiceWarm === true); if (window.FishVoice.setVoiceId) window.FishVoice.setVoiceId(s.voiceId || ""); if (window.FishVoice.setVoiceOut) window.FishVoice.setVoiceOut(s.voiceOut || "tts", s.rvcPitch || 0); } } catch (e) { }
     // 回复模型：DSH 还是自定…?API。两边配置分弢…传，切换…?voice.js 自己会清历史…?
     try {
       if (s && window.FishVoice && window.FishVoice.setApiConfig) {
@@ -1820,7 +1824,7 @@
     try { st = await window.deskfish.settingsGet(); } catch (e) { }
     console.log("[fish] boot settings mic=" + JSON.stringify(st && st.micDevice) + " voice=" + (window.FishVoice ? 1 : 0));
     try { if (st && window.FishVoice && window.FishVoice.setDevice) window.FishVoice.setDevice(st.micDevice || ""); } catch (e) { console.log("[fish] setDevice 失败 " + e.message); }
-    try { if (st && window.FishVoice) { if (window.FishVoice.setVoiceId) window.FishVoice.setVoiceId(st.voiceId || ""); if (window.FishVoice.setVoiceOut) window.FishVoice.setVoiceOut(st.voiceOut || "tts", st.rvcPitch || 0); } } catch (e) { }
+    try { if (st && window.FishVoice) { if (window.FishVoice.setWarm) window.FishVoice.setWarm(st.voiceWarm === true); if (window.FishVoice.setVoiceId) window.FishVoice.setVoiceId(st.voiceId || ""); if (window.FishVoice.setVoiceOut) window.FishVoice.setVoiceOut(st.voiceOut || "tts", st.rvcPitch || 0); } } catch (e) { }
     try {
       if (st && window.FishVoice && window.FishVoice.setApiConfig) {
         window.FishVoice.setApiConfig({ apiBase: st.apiBase || "", apiKey: st.apiKey || "", apiModel: st.apiModel || "" });

@@ -24,11 +24,26 @@ function diagnose(p) {
   const issues = [];
   const m = p.manifest || {};
 
+  // 只剩配置、模型文件已经不在的包（升级后残留的孤儿覆盖层）：结构层第一句话就得说清楚，
+  // 否则下面会一路报「缺 5 个参数」，用户以为是自己没适配好。
+  if (p.missingModel) {
+    issues.push({
+      level: "error",
+      layer: "disk",
+      code: "missing-model",
+      message: "模型文件不存在（只剩配置，没有 .moc3 / 贴图）—— 重新导入完整模型",
+    });
+  }
+
   const mv = M.validate(m);
   for (const i of mv.issues) issues.push(Object.assign({ layer: "manifest" }, i));
 
   const r = p.report || {};
-  for (const e of r.errors || []) issues.push({ level: "error", layer: "disk", code: "disk", message: e });
+  for (const e of r.errors || []) {
+    // 上面已经用一句话说明了「模型文件不存在」，探测层再重复一遍只会像两个不同的错。
+    if (p.missingModel && /模型文件不存在/.test(String(e || ""))) continue;
+    issues.push({ level: "error", layer: "disk", code: "disk", message: e });
+  }
   // 贴图缺失单独处理：Cubism 引擎只要有一张贴图 404，整个模型就加载失败（实测过）。
   // 它不是「某张图不太对」，是这个包画不出来 —— 按 warn 每张扣 4 分会给出「84 分能用」的假象。
   const missTex = (r.textures || []).filter((t) => t.missing);
@@ -79,9 +94,14 @@ function diagnose(p) {
     broken: "还不能用，先处理红色问题",
   }[verdict];
 
-  // 一句话总结：优先说「最关键的下一步」，而不是罗列所有问题
+  // 一句话总结：优先说「最关键的下一步」，而不是罗列所有问题。
+  // 磁盘层的致命错误（模型/贴图没了）永远排在最前 —— 这时候说「缺 5 个参数」是误导，
+  // 参数绑得再全，文件不在也加载不出来。
+  const fatalError = errors.find((i) => i.layer === "disk" && FATAL_RE.test(i.message || ""));
   let headline = "";
-  if (missingRequired.length) {
+  if (fatalError) {
+    headline = fatalError.message;
+  } else if (missingRequired.length) {
     headline = `还差 ${missingRequired.length} 个必需参数没绑（${missingRequired.map((id) => sem.PARAM_BY_ID[id].label).join("、")}）`;
   } else if (errors.length) {
     headline = errors[0].message;
