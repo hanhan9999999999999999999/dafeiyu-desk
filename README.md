@@ -200,11 +200,11 @@ zip 直接拖进窗口，或点「导入压缩包」；解包、剥壳、找 `mo
 
 | 文件 | 大小 | SHA-256 |
 |---|---|---|
-| [dafeiyu-1.1.2-setup.exe](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/download/v1.1.2/dafeiyu-1.1.2-setup.exe) | 940,094,007 B（≈ 896.5 MB） | `27738b161255e05f8eb80875b40bfe46cd700ec68cb93a4e256d11ce0c1da9e9` |
+| [dafeiyu-1.1.3-setup.exe](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/download/v1.1.3/dafeiyu-1.1.3-setup.exe) | 940,097,859 B（≈ 896.5 MB） | `994958b8dfe3fcec622ec44f0204b6e4296e2a968939b5e221f18bce10569af9` |
 
-页面版入口：[Releases · v1.1.2](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/tag/v1.1.2)。
+页面版入口：[Releases · v1.1.2](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/tag/v1.1.3)。
 
-1. 下载上面的 `dafeiyu-1.1.2-setup.exe`（约 900 MB，含离线语音与变声环境）。
+1. 下载上面的 `dafeiyu-1.1.3-setup.exe`（约 900 MB，含离线语音与变声环境）。
 2. 双击安装。程序未做代码签名，SmartScreen 会提示「未知发布者」——这是当前版本的已知限制，不是文件损坏。
 3. 第一次打开会引导导入模型：选一个 `.zip`，或选解压后的模型文件夹。
 4. 右键她和托盘图标都能进设置。
@@ -212,14 +212,14 @@ zip 直接拖进窗口，或点「导入压缩包」；解包、剥壳、找 `mo
 校验下载是否完整（PowerShell）：
 
 ```powershell
-Get-FileHash .\dafeiyu-1.1.2-setup.exe -Algorithm SHA256
+Get-FileHash .\dafeiyu-1.1.3-setup.exe -Algorithm SHA256
 # 应输出 27738B16...DA9E9
 ```
 
 静默安装：
 
 ```
-dafeiyu-1.1.2-setup.exe /S /D=D:\Apps\Dafeiyu
+dafeiyu-1.1.3-setup.exe /S /D=D:\Apps\Dafeiyu
 ```
 
 > 升级安装会保留 `%APPDATA%\dafeiyu-desk` 里的设置与已导入的模型。
