@@ -319,6 +319,42 @@
     play: PB ? PB.name : null,
   });
 
+  // 贴图是 4096/8192 的大图，预览里只有几百像素高：线性过滤每帧只采 2×2 个像素，
+  // 线条必然发糊。打开 mipmap（每级预先缩好），采样时按实际尺寸挑层级，缩略图才清晰。
+  // 另外把 minFilter 保持 linear（不用 nearest）：二次元线稿用 nearest 会出锯齿和摩尔纹。
+  function sharpenTextures(model) {
+    const list = (model && model.textures) || [];
+    const MAX = 2048;
+    for (const tex of list) {
+      const src = tex && (tex.source || tex.baseTexture);
+      if (!src) continue;
+      try {
+        // 预览窗口只有 550 宽，8192 贴图纯浪费显存，顺手缩到 2048。
+        // Cubism 用归一化 UV，换尺寸不影响贴图对应关系。
+        const r = src.resource;
+        const iw = (r && (r.naturalWidth || r.width)) || 0;
+        const ih = (r && (r.naturalHeight || r.height)) || 0;
+        if (Math.max(iw, ih) > MAX) {
+          const k = MAX / Math.max(iw, ih);
+          const tw = Math.max(1, Math.round(iw * k));
+          const th = Math.max(1, Math.round(ih * k));
+          const cv = document.createElement("canvas");
+          cv.width = tw;
+          cv.height = th;
+          const cx = cv.getContext("2d");
+          cx.imageSmoothingEnabled = true;
+          cx.imageSmoothingQuality = "high";
+          cx.drawImage(r, 0, 0, tw, th);
+          if (typeof src.resize === "function") src.resize(tw, th);
+          src.resource = cv;
+        }
+        src.autoGenerateMipmaps = true;
+        if (src.style) src.style.scaleMode = "linear";
+        if (typeof src.updateMipmaps === "function") src.updateMipmaps();
+      } catch (e) { }
+    }
+  }
+
   async function loadPreview(doc) {
     if (!vendor) { $("hint").textContent = "Live2D 引擎没加载上"; return; }
     $("hint").style.display = "none";
@@ -341,7 +377,9 @@
         backgroundAlpha: 0,
         antialias: true,
         autoDensity: true,
-        resolution: Math.min(2, window.devicePixelRatio || 1),
+        // 预览窗里模型只有几百像素高，而贴图动辄 8192：
+        // 只按 dpr=1 渲染等于 1:1 缩小采样，线条会糊成一片。渲染 2 倍再让浏览器缩回来（SSAA）。
+        resolution: Math.min(2.5, Math.max(2, window.devicePixelRatio || 1)),
         preference: "webgl",
         preserveDrawingBuffer: true,
       });
@@ -358,13 +396,21 @@
       });
       // 切换得太快时，旧的加载会晚到；丢掉它，别把新模型挤掉
       if (S.doc && S.doc.id !== doc.id) { try { m.destroy(); } catch (e) { } return; }
+      // 换模型先把旧的拆掉：pixi-live2d 的 model.destroy() 会解绑内部模型和贴图引用，
+      // 不拆的话每切一次就留一份完整模型在显存里。
+      if (S.model) { try { S.model.destroy({ children: true, texture: false, baseTexture: false }); } catch (e) { } }
       S.model = m;
+      sharpenTextures(m);
+      // 调试出口：想知道「表情/动作到底有没有写进去」时，能在控制台直接看 coreModel 参数。
+      // 只在适配器窗口有，不影响主窗口。
+      window.__S = S;
       m.anchor.set(0.5);
       S.app.stage.addChild(m);
       // 参数名 → 索引：不能偷懒用 getParameterIndex()，那个返回的索引带偏移
       //（实测 Movement2 应该是 16，它给 510），写进去不报错、值全落到别的变形器上。
       S.idx = buildIdx(m);
       S.model.internalModel.on("beforeModelUpdate", applyPlayback);
+      S.model.internalModel.on("beforeModelUpdate", applyExprPreview);
       try { m.motion("idle", 0, 3); } catch (e) { }
       layoutPreview();
       ensureBox();
@@ -685,6 +731,67 @@
     setTimeout(() => { if (PB && PB.name === name) PB = null; }, dur * 1000 + 80);
   }
 
+  // 表情试播：自己读 exp3 再写参数。
+  // 不能只靠 model.expression(name)：引擎只认 model3.json 里声明过的表情，
+  // 而素材库里的表情有一半是从目录里扫出来、没写进清单的（declared:false），
+  // 那些调用一律返回 false，看起来就是「点了没反应」。
+  let EX = null;
+  async function playExprFile(file, label) {
+    if (!S.model || !S.idx) { toast("模型还没加载好", "bad"); return; }
+    try {
+      const r = await fetch("/packs/" + S.doc.id + "/" + file, { cache: "no-store" });
+      if (!r.ok) throw new Error("读不到文件（" + r.status + "）");
+      const j = await r.json();
+      const list = Array.isArray(j.Parameters) ? j.Parameters : [];
+      const mapped = [];
+      for (const p of list) {
+        const id = p.Id || p.id;
+        const i = S.idx[id];
+        if (i === undefined) continue;
+        mapped.push({ i, v: Number(p.Value != null ? p.Value : p.value) || 0,
+          blend: Number(p.Blend != null ? p.Blend : p.blend) || 0 });
+      }
+      if (!mapped.length) {
+        toast("这个表情驱动的参数模型里没有（" + list.length + " 条全部落空）", "bad");
+        return;
+      }
+      // 先按名字试一次引擎路径（声明过的表情会走引擎的淡入），失败再用自绘
+      if (S.model) { try { await S.model.expression(label); } catch (e) { } }
+      EX = { label, params: mapped, t0: performance.now(), dur: 2.9 };
+      window.__EX = EX;
+      toast("表情 " + (label || file) + " · " + mapped.length + "/" + list.length + " 个参数");
+    } catch (e) { toast(e.message, "bad"); }
+  }
+
+  // 表情每帧写参数：淡入 0.25s → 保持 2.2s → 淡出 0.35s，回到参数默认值。
+  // 基线用 getParameterDefaultValueByIndex，不是 0——很多模型的嘴/眼默认值不是 0。
+  function applyExprPreview() {
+    if (!EX || !S.model) return;
+    window.__EXN = (window.__EXN || 0) + 1;
+    const t = (performance.now() - EX.t0) / 1000;
+    const fi = 0.25, hold = 2.2, fo = 0.35;
+    let w;
+    if (t < fi) w = t / fi;
+    else if (t < fi + hold) w = 1;
+    else if (t < fi + hold + fo) w = 1 - (t - fi - hold) / fo;
+    else { EX = null; return; }
+    const cm = S.model.internalModel.coreModel;
+    // Cubism Core 没有 getParameterDefaultValueByIndex（调了会直接抛），
+    // 默认值挂在 coreModel._model.parameters.defaultValues 上。
+    const params = cm._model && cm._model.parameters;
+    const dv = params && params.defaultValues;
+    const def = (i) => (dv && typeof dv[i] === "number" ? dv[i] : cm.getParameterValueByIndex(i));
+    for (const p of EX.params) {
+      const base = def(p.i);
+      let target = p.v;
+      if (p.blend === 1) target = base + p.v;
+      else if (p.blend === 2) target = base * p.v;
+      const cur = cm.getParameterValueByIndex(p.i);
+      cm.setParameterValueByIndex(p.i, cur + (target - cur) * w, 1);
+      window.__EXDBG = [p.i, base, target, cur, w, cm.getParameterValueByIndex(p.i)];
+    }
+  }
+
   // 每帧写参数：和主窗口同一个时机（beforeModelUpdate），
   // 这样既不会被 automator 覆盖，也赶得上 coreModel.update()。
   function applyPlayback() {
@@ -864,8 +971,7 @@
         const pb = el("button", "lbtn", "▶");
         pb.addEventListener("click", () => {
           flash(pb);
-          try { S.model.expression(e.name); toast("表情 " + e.name); }
-          catch (err) { toast("这个表情播不了：" + err.message, "bad"); }
+          playExprFile(e.file, e.name);
         });
         row.appendChild(pb);
         const bd2 = el("button", "lbtn", "设为默认");
@@ -1448,6 +1554,16 @@
       });
     }
   } catch (e) { }
+
+  // 关窗口时把 PIXI / WebGL 资源放掉：不然每开一次适配器就多一份 8192 贴图，
+  // 来回开几次显存就上去了（任务管理器里表现为 Electron GPU 进程一路涨）。
+  window.addEventListener("beforeunload", () => {
+    try {
+      if (S.app) S.app.destroy(true, { children: true, texture: true, textureSource: true });
+    } catch (e) { }
+    S.model = null;
+    S.app = null;
+  });
 
   loadList();
 })();

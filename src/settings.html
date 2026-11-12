@@ -516,7 +516,22 @@
 
         <div class="subpage" data-sub="timbre">
           <div class="card">
-            <h3>变声引擎<span class="hint">选一个就够</span></h3>
+            <h3>用哪个引擎<span class="hint">四选一</span></h3>
+            <div class="row">
+              <div class="label">当前引擎<small>和「听与说」里选的是同一个开关，改哪边都一样</small></div>
+              <div class="seg" id="timbreSeg">
+                <button data-v="tts" type="button">TTS</button>
+                <button data-v="rvc" type="button">RVC</button>
+                <button data-v="xtts" type="button">XTTS</button>
+                <button data-v="feiyu" type="button">飞鱼</button>
+              </div>
+            </div>
+            <p class="hint" id="timbreNote">TTS 用的是上面选的音色（内置引擎），不需要装任何东西，开箱就能说话。</p>
+          </div>
+
+          <div class="card">
+            <h3>引擎参数<span class="hint">只显示当前选中的那套</span></h3>
+            <p class="hint" id="timbreTtsNote">TTS 是内置引擎，这里没有要调的参数。换到 RVC / XTTS / 飞鱼才会出现各自的设置。</p>
 
             <div class="row row-stack hidden" id="feiyuBox">
               <div class="label">飞鱼声线<small>参考音频决定音色：一个 wav 加同名 .txt（txt 里写这段音频说了什么）。首次加载约 25 秒，之后每句 1～2 秒</small></div>
@@ -702,22 +717,32 @@
         </div>
 
         <div class="card">
-          <h3>视觉接口<span class="hint">留空用本机 DSH 视觉</span></h3>
-          <p class="hint">默认走本机 DSH 视觉，不需要额外 Key；只有填了下面的接口才改用外部视觉服务。截图只在本机抓。</p>
+          <h3>看图能力<span class="hint">默认程序自带</span></h3>
+          <p class="hint" id="seeModeHint">默认用程序自带的看图逻辑（本机 DSH，不需要 Key，也不用装别的东西）。已经买了视觉 API 的，可以切到外部接口。</p>
 
           <div class="row">
-            <div class="label">接口地址<small>OpenAI 兼容地址；留空 = 用本机 DSH 视觉</small></div>
-            <input id="seeBase" type="text" spellcheck="false" placeholder="留空 = 用 DSH 本地视觉">
+            <div class="label">用哪个通道<small>自带最省事；外部接口适合你本来就有视觉服务</small></div>
+            <div class="seg" id="seeModeSeg">
+              <button data-v="own" class="on" type="button">程序自带</button>
+              <button data-v="api" type="button">外部接口</button>
+            </div>
           </div>
 
-          <div class="row">
-            <div class="label">API Key<small>只有用外部视觉接口时才需要；只存本机，不写进导出配置</small></div>
-            <input id="seeKey" type="password" spellcheck="false" placeholder="留空 = 用 DSH 本地视觉">
-          </div>
+          <div id="seeApiBox" class="hidden">
+            <div class="row">
+              <div class="label">接口地址<small>OpenAI 兼容地址，例如 https://api.openai.com/v1</small></div>
+              <input id="seeBase" type="text" spellcheck="false" placeholder="选外部接口后填">
+            </div>
 
-          <div class="row">
-            <div class="label">视觉模型<small>外部视觉模型名，要支持图片输入；留空 = 用本机 DSH 视觉</small></div>
-            <input id="seeModel" type="text" spellcheck="false" placeholder="例如 gpt-4o-mini（可留空）">
+            <div class="row">
+              <div class="label">API Key<small>只存本机，不写进导出配置</small></div>
+              <input id="seeKey" type="password" spellcheck="false" placeholder="选外部接口后填">
+            </div>
+
+            <div class="row">
+              <div class="label">视觉模型<small>要支持图片输入，例如 gpt-4o-mini</small></div>
+              <input id="seeModel" type="text" spellcheck="false" placeholder="例如 gpt-4o-mini">
+            </div>
           </div>
         </div>
 

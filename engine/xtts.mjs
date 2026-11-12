@@ -124,6 +124,15 @@ function touchIdle() {
     log('空闲超时，卸载模型');
     fetch(`${BASE}/unload`, { method: 'POST' }).catch(() => {});
     ready = false;
+    // /unload 之后 torch 的缓存分配器仍然占着内存，再等半分钟没动静就把
+    // 子进程整个收掉，任务管理器里的数字才会真的降下来。
+    setTimeout(() => {
+      if (!child) return;
+      try { child.kill(); } catch (e) { }
+      child = null;
+      ready = false;
+      log('空闲超时，服务进程已退出');
+    }, 30 * 1000).unref?.();
   }, IDLE_MS);
   if (idleTimer.unref) idleTimer.unref();
 }

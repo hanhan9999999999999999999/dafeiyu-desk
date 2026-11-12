@@ -175,6 +175,16 @@ function touchIdle() {
     log('空闲超时，卸载模型');
     fetch(`${BASE}/unload`, { method: 'POST' }).catch(() => {});
     ready = false;
+    // /unload 只把模型挪出显存，Python 进程本身还留着 torch 的缓存分配器，
+    // 任务管理器里动辄好几 GB。再等半分钟确实没人用，就把服务进程整个收掉，
+    // 内存才会真的回到系统；下次说话会重新拉起（25 秒左右）。
+    setTimeout(() => {
+      if (!child) return;
+      try { child.kill(); } catch (e) { }
+      child = null;
+      ready = false;
+      log('空闲超时，服务进程已退出');
+    }, 30 * 1000).unref?.();
   }, IDLE_MS);
   if (idleTimer.unref) idleTimer.unref();
 }

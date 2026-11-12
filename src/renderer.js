@@ -457,20 +457,45 @@
         const tex = model.textures[i];
         const src = tex && (tex.source || (tex.baseTexture && tex.baseTexture.source));
         if (!src) return;
-        // 丢掉引擎早先加载的那张缩水图，别让它丢…直挂睢…
+        // 大图缩到「够用的大小」再上 GPU：桌宠窗口通常 400~600 高，
+        // 8192×8192 的贴图纯属浪费显存（五张就是 1GB+）。2048 已经够 4 倍超采样。
+        // 先画进 canvas 再挂上去，比例不变、UV 不变，Cubism 只看归一化坐标。
+        const MAX = 2048;
+        const nw = img.naturalWidth || 1;
+        const nh = img.naturalHeight || 1;
+        let use = img;
+        let tw = nw;
+        let th = nh;
+        if (Math.max(nw, nh) > MAX) {
+          const k = MAX / Math.max(nw, nh);
+          tw = Math.max(1, Math.round(nw * k));
+          th = Math.max(1, Math.round(nh * k));
+          try {
+            const cv = document.createElement("canvas");
+            cv.width = tw;
+            cv.height = th;
+            const cx = cv.getContext("2d");
+            cx.imageSmoothingEnabled = true;
+            cx.imageSmoothingQuality = "high";
+            cx.drawImage(img, 0, 0, tw, th);
+            use = cv;
+          } catch (e) { use = img; tw = nw; th = nh; }
+        }
+        // 丢掉引擎早先加载的那张缩水图，别让它一直挂着
         const old = src.resource;
-        if (old && old !== img && typeof old.close === "function") {
+        if (old && old !== use && typeof old.close === "function") {
           try { old.close(); } catch (e) { }
         }
-        if (typeof src.resize === "function") src.resize(img.naturalWidth, img.naturalHeight);
-        src.resource = img;
-        src.autoGenerateMipmaps = false;
-        src.mipLevelCount = 1;
+        if (typeof src.resize === "function") src.resize(tw, th);
+        src.resource = use;
+        // 2048 缩到 460 显示还有 4 倍，开 mipmap 才不会闪烁/发糊
+        src.autoGenerateMipmaps = true;
+        if (typeof src.updateMipmaps === "function") { try { src.updateMipmaps(); } catch (e) { } }
         src.update();
         if (src.style) {
           src.style.minFilter = "linear";
           src.style.magFilter = "linear";
-          src.style.mipmapFilter = "none";
+          src.style.mipmapFilter = "linear";
           src.style.anisotropicLevel = 1;
         }
       })().catch(() => { }));

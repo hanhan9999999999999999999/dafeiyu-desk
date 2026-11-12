@@ -59,6 +59,9 @@ const els = {
   // RVC：八个一次加齐。els 是硬编码表，漏一个会让 paint() 抛出去、
   // 整个面板的按钮全部失效——这个坑踩过一次，不再踩。
   voiceOutSeg: document.getElementById("voiceOutSeg"),
+  timbreSeg: document.getElementById("timbreSeg"),
+  timbreNote: document.getElementById("timbreNote"),
+  timbreTtsNote: document.getElementById("timbreTtsNote"),
   xttsBox: document.getElementById("xttsBox"),
   xttsRef: document.getElementById("xttsRef"),
   xttsSpeed: document.getElementById("xttsSpeed"),
@@ -105,6 +108,9 @@ const els = {
   apiTest: document.getElementById("apiTest"),
   apiResult: document.getElementById("apiResult"),
   seeBase: document.getElementById("seeBase"),
+  seeModeSeg: document.getElementById("seeModeSeg"),
+  seeModeHint: document.getElementById("seeModeHint"),
+  seeApiBox: document.getElementById("seeApiBox"),
   seeKey: document.getElementById("seeKey"),
   seeModel: document.getElementById("seeModel"),
   seeInterval: document.getElementById("seeInterval"),
@@ -377,6 +383,19 @@ function paint(s) {
   if (els.seeInterval) els.seeInterval.value = String(s.seeInterval == null ? 1.6 : s.seeInterval);
   if (els.seeGap) els.seeGap.value = String(s.seeGap == null ? 7 : s.seeGap);
   if (els.seeSpeak) els.seeSpeak.classList.toggle("on", s.seeSpeak !== false);
+  // 看屏幕：默认程序自带（不填接口），只有填了地址才算「外部接口」
+  if (els.seeModeSeg) {
+    const useApi = !!String(s.seeBase || "").trim();
+    for (const b of els.seeModeSeg.children) {
+      b.classList.toggle("on", b.dataset.v === (useApi ? "api" : "own"));
+    }
+    if (els.seeApiBox) els.seeApiBox.classList.toggle("hidden", !useApi);
+    if (els.seeModeHint) {
+      els.seeModeHint.textContent = useApi
+        ? "现在走外部视觉接口。截图仍然只在本机抓，只有这一帧图和一句提示会发到你填的地址。"
+        : "默认用程序自带的看图逻辑（本机 DSH，不需要 Key，也不用装别的东西）。已经买了视觉 API 的，可以切到外部接口。";
+    }
+  }
   if (els.replyModeSeg) {
     for (const b of els.replyModeSeg.children) {
       b.classList.toggle("on", b.dataset.v === (s.replyMode || "dsh"));
@@ -394,6 +413,22 @@ function paint(s) {
   if (els.rvcBox) els.rvcBox.classList.toggle("hidden", (s.voiceOut || "tts") !== "rvc");
   if (els.xttsBox) els.xttsBox.classList.toggle("hidden", (s.voiceOut || "tts") !== "xtts");
   if (els.feiyuBox) els.feiyuBox.classList.toggle("hidden", (s.voiceOut || "tts") !== "feiyu");
+  if (els.timbreSeg) {
+    for (const b of els.timbreSeg.children) {
+      b.classList.toggle("on", b.dataset.v === (s.voiceOut || "tts"));
+    }
+  }
+  if (els.timbreTtsNote) {
+    els.timbreTtsNote.classList.toggle("hidden", (s.voiceOut || "tts") !== "tts");
+  }
+  if (els.timbreNote) {
+    const v = s.voiceOut || "tts";
+    els.timbreNote.textContent = v === "tts"
+      ? "TTS 用的是上面选的音色（内置引擎），不需要装任何东西，开箱就能说话。想要更有个性的嗓子，再选 RVC / XTTS / 飞鱼。"
+      : v === "rvc" ? "RVC 在 TTS 后面换一遍嗓子：需要 Python 环境和 .onnx/.pth 模型，第一次用点下面的「启动」。"
+      : v === "xtts" ? "XTTS 从参考音频克隆音色：需要 Python 环境，第一次加载约 70 秒。"
+      : "飞鱼是中文原生声线：整套约 14 GB，点下面的「一键安装」自动下。";
+  }
   if (els.feiyuRefDir) els.feiyuRefDir.value = s.feiyuRefDir || "";
   if (els.feiyuHome) els.feiyuHome.value = s.feiyuHome || "";
   if (els.feiyuHomeInfo) {
@@ -611,6 +646,28 @@ if (els.voiceOutSeg) {
     const b = e.target.closest("button");
     if (!b) return;
     push({ voiceOut: b.dataset.v });
+  });
+}
+
+if (els.timbreSeg) {
+  els.timbreSeg.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    push({ voiceOut: b.dataset.v });
+  });
+}
+
+if (els.seeModeSeg) {
+  els.seeModeSeg.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.v === "own") {
+      // 切回自带：清掉外部地址和模型，别让旧配置偷偷生效
+      push({ seeBase: "", seeModel: "", seeKey: "" });
+    } else {
+      if (els.seeApiBox) els.seeApiBox.classList.remove("hidden");
+      if (els.seeBase) els.seeBase.focus();
+    }
   });
 }
 

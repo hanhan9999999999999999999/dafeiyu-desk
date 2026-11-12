@@ -3202,6 +3202,7 @@ function readAutostartReg() {
       reg.execFile(
         "reg",
         ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", "/v", "DafeiyuDesk"],
+        { windowsHide: true },
         (err, stdout) => {
           if (err) return resolve({ present: false, value: "" });
           resolve({ present: true, value: String(stdout || "") });
@@ -3233,12 +3234,12 @@ async function applyLaunchAtLogin(enabled) {
         ? `cmd.exe /c "set ELECTRON_RUN_AS_NODE= && start "" "${exe}""`
         : `cmd.exe /c "set ELECTRON_RUN_AS_NODE= && start "" "${exe}" "${RES_ROOT}""`;
       await new Promise((resolve) => {
-        reg.execFile("reg", ["add", RUN_KEY, "/v", "DafeiyuDesk", "/t", "REG_SZ", "/d", cmd, "/f"],
+        reg.execFile("reg", ["add", RUN_KEY, "/v", "DafeiyuDesk", "/t", "REG_SZ", "/d", cmd, "/f"], { windowsHide: true },
           (err, stdout, stderr) => resolve({ err, stdout, stderr }));
       });
     } else {
       await new Promise((resolve) => {
-        reg.execFile("reg", ["delete", RUN_KEY, "/v", "DafeiyuDesk", "/f"],
+        reg.execFile("reg", ["delete", RUN_KEY, "/v", "DafeiyuDesk", "/f"], { windowsHide: true },
           (err, stdout, stderr) => resolve({ err, stdout, stderr }));
       });
     }
@@ -3389,7 +3390,9 @@ try {
     "\nuserData=" + app.getPath("userData") + "\nargv=" + JSON.stringify(process.argv) + "\n",
     "utf8");
 } catch (e) { }
-if (!gotLock) {
+if (!gotLock && !process.env.FISH_MULTI) {
+  // FISH_MULTI=1 时允许再起一个实例，只给开发/自测用：
+  // 打包版和开发版共用 userData，单实例锁会让第二个直接退出，测不了。
   app.quit();
 } else {
   app.on("second-instance", () => {
