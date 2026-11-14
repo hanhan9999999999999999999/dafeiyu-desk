@@ -89,6 +89,39 @@ node bridge/mini-bridge.mjs --port 8899
 - 声音默认走 Edge TTS；也可以在设置里换成自己的 TTS / RVC / XTTS 引擎。没有配置语音时，文字对话仍然可用。
 - Live2D Cubism Core 属于 Live2D 的专有组件，不随源码仓库分发；从源码构建前请先看 [BUILD.md](BUILD.md)。
 
+### CosyVoice / 飞鱼声线
+
+飞鱼声线由 CosyVoice3 驱动。程序里的「一键安装」会优先走 `ghproxy.net` 和 `hf-mirror.com`；如果哪天代理或镜像不可用，可以按下面的原址自行下载，不必等程序更新。
+
+| 组件 | 原址 | 镜像 / 固定版本 |
+| --- | --- | --- |
+| CosyVoice 源码 | [FunAudioLLM/CosyVoice](https://github.com/FunAudioLLM/CosyVoice) | 固定 commit [`074ca6d`](https://github.com/FunAudioLLM/CosyVoice/tree/074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc) |
+| 飞鱼声库 | [Esmerubphire/FeiyuVoice-CosyVoice3](https://huggingface.co/Esmerubphire/FeiyuVoice-CosyVoice3) | [hf-mirror 镜像](https://hf-mirror.com/Esmerubphire/FeiyuVoice-CosyVoice3) |
+| 中文 Hubert | [TencentGameMate/chinese-hubert-base](https://huggingface.co/TencentGameMate/chinese-hubert-base) | [hf-mirror 镜像](https://hf-mirror.com/TencentGameMate/chinese-hubert-base) |
+| Matcha-TTS（依赖） | [shivammehta25/Matcha-TTS](https://github.com/shivammehta25/Matcha-TTS) | 固定 commit [`dd9105b`](https://github.com/shivammehta25/Matcha-TTS/tree/dd9105b34bf2be2230f4aa1e4769fb586a3c824e) |
+
+> 本机直连 `huggingface.co` 可能超时；表里的 `hf-mirror.com` 与 HF 仓库内容一致，优先用镜像。
+
+手动放置时，目录结构：
+
+```text
+<飞鱼目录>\
+├─ venv\                          # Python 3.11 环境
+├─ cosyvoice\                     # CosyVoice 源码，切到 074ca6d
+├─ models\
+│  └─ FeiyuVoice-CosyVoice3\      # 飞鱼声库
+└─ zh-hubert\                     # 中文 Hubert
+```
+
+源码可以直接 clone 到目标目录并切到验证过的版本：
+
+```bash
+git clone https://github.com/FunAudioLLM/CosyVoice.git "<飞鱼目录>\cosyvoice"
+git -C "<飞鱼目录>\cosyvoice" checkout 074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc
+```
+
+然后在 **设置 → 声音与行为 →「环境」** 里填 `<飞鱼目录>`。CosyVoice 需要 Python 3.11、PyTorch 2.11.0+cu128 和约 14 GB 磁盘；一键安装仍是首选，手动方式只作为代理失效时的兜底。
+
 ## 快捷键
 
 | 快捷键 | 作用 |
