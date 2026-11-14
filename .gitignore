@@ -1,0 +1,47 @@
+# ä¾èµ–ä¸äº§ç‰©
+node_modules/
+dist/
+runtime/
+rvc/
+tts2/
+
+# æ¨¡å‹ä¸æ¨¡å‹èµ„æºï¼ˆç»ä¸å…¥ä»“ï¼‰
+model/
+models/
+*.moc3
+*.model3.json
+*.physics3.json
+*.cdi3.json
+*.exp3.json
+*.motion3.json
+*.png.bak
+
+# äºŒè¿›åˆ¶ä¸æƒé‡
+*.onnx
+*.pth
+*.bin
+*.exe
+*.dll
+*.7z
+*.zip
+*.wav
+*.mp3
+
+# è¿è¡ŒæœŸ
+*.log
+_test/out/
+_test/tmp/
+_test/*.png
+_test/*.json
+_test/**/edge-profile*/
+
+# ç¼–è¾‘å™¨ / ç³»ç»Ÿ
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ´ò°ü¹¤¾ß£ºafterPack ĞèÒªËü²¹ exe Í¼±êÓë°æ±¾ĞÅÏ¢
+!tools/rcedit.exe
+

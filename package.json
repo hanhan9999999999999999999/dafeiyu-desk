@@ -1,0 +1,149 @@
+﻿{
+  "name": "dafeiyu-desk",
+  "version": "1.3.0",
+  "private": true,
+  "description": "大肥鱼 · 桌面 Live2D 伴侣",
+  "main": "src/main.js",
+  "type": "commonjs",
+  "author": "小代码酱",
+  "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://github.com/hanhan9999999999999999999/dafeiyu-desk",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hanhan9999999999999999999/dafeiyu-desk.git"
+  },
+  "scripts": {
+    "start": "runtime\\electron.exe .",
+    "deploy": "electron-builder --win --x64",
+    "build": "node ./node_modules/electron-builder/cli.js --win --x64 && node ./scripts/fix-latest.js",
+    "verify:pack": "node scripts/verify-pack.js",
+    "verify:packs": "node scripts/verify-packs.js",
+    "verify:src": "node scripts/verify-src.js",
+    "verify:server": "node scripts/verify-server.js",
+    "test": "node scripts/test-pet.js && node scripts/test-settings.js",
+    "verify": "node scripts/verify-src.js && node scripts/verify-packs.js && node scripts/verify-pack.js && node scripts/verify-server.js && npm test"
+  },
+  "devDependencies": {
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.dafeiyu.desk",
+    "productName": "大肥鱼",
+    "electronVersion": "35.7.5",
+    "electronDist": "runtime",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "asar": true,
+    "afterPack": "scripts/afterpack.js",
+    "files": [
+      "src/**/*",
+      "assets/icon.ico",
+      "assets/icon.png",
+      "assets/LICENSE.txt",
+      "assets/PRIVACY.txt",
+      "assets/voice/*.wav",
+      "package.json",
+      "!**/*.bak*",
+      "!_test/**/*",
+      "!run.log"
+    ],
+    "extraResources": [
+      {
+        "from": "src",
+        "to": "src"
+      },
+      {
+        "from": "rvc",
+        "to": "rvc",
+        "filter": [
+          "**/**",
+          "!__pycache__/**",
+          "!*.pyc",
+          "!*.pyo",
+          "!_tmp/**",
+          "!*.log",
+          "!*.wav",
+          "!*.tmp",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/*.pyo",
+          "!*.mp3",
+          "!models/keqing/**",
+          "!models/**/*.pth",
+          "!models/*/*.onnx",
+          "!models/*/*.index",
+          "!**/_dl/**",
+          "!py/Lib/site-packages/pip/**",
+          "!py/Lib/site-packages/setuptools/**",
+          "!py/Lib/site-packages/pkg_resources/**",
+          "!py/Lib/test/**",
+          "!py/Lib/idlelib/**",
+          "!py/Lib/tkinter/**",
+          "!py/Lib/turtledemo/**",
+          "!py/Lib/ensurepip/**",
+          "!py/Lib/site-packages/**/tests/**",
+          "!py/Lib/site-packages/**/*.lib",
+          "!py/Lib/site-packages/**/*.a",
+          "!py/Lib/site-packages/**/include/**",
+          "!py/Lib/site-packages/~*/**",
+          "!**/_bak_torch/**"
+        ]
+      },
+      {
+        "from": "vendor",
+        "to": "vendor"
+      },
+      {
+        "from": "assets",
+        "to": "assets"
+      },
+      {
+        "from": "engine",
+        "to": "engine",
+        "filter": [
+          "**/**",
+          "!_asrtest.mjs",
+          "!_selftest.mjs",
+          "!*.log",
+          "!runtime/tts/**",
+          "!runtime/asr/**",
+          "!models/ggml-large-v3-turbo.bin"
+        ]
+      },
+      {
+        "from": "bridge",
+        "to": "bridge"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "artifactName": "大肥鱼-${version}-安装包.${ext}",
+      "signAndEditExecutable": false,
+      "forceCodeSigning": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "大肥鱼",
+      "uninstallDisplayName": "大肥鱼",
+      "deleteAppDataOnUninstall": false,
+      "license": "LICENSE.txt",
+      "runAfterFinish": true
+    }
+  }
+}
+

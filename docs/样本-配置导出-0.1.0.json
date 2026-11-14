@@ -1,0 +1,30 @@
+{
+  "app": "dafeiyu-desk",
+  "version": "0.1.0",
+  "exportedAt": "2026-11-04T22:11:03.040Z",
+  "settings": {
+    "bridgeUrl": "http://127.0.0.1:8899",
+    "voiceId": "",
+    "micDevice": "",
+    "scale": 1,
+    "opacity": 1,
+    "resolution": 2,
+    "sharpen": true,
+    "alwaysOnTop": true,
+    "clickThrough": false,
+    "followCursor": true,
+    "autoIdle": true,
+    "blinkEnabled": true,
+    "dockAutoHide": true,
+    "launchAtLogin": false,
+    "voiceOut": "rvc",
+    "rvcBackend": "onnx",
+    "rvcDevice": "dml",
+    "rvcPitch": 0,
+    "rvcAutoStop": true,
+    "rvcModel": "models/warma/Warma-03.onnx",
+    "replyMode": "dsh",
+    "apiBase": "",
+    "apiModel": ""
+  }
+}

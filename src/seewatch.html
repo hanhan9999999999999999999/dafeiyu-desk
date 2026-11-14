@@ -1,0 +1,250 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; media-src 'self' blob: data: http://127.0.0.1:*; connect-src 'self' data: blob: http://127.0.0.1:* ws://127.0.0.1:*; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>看屏幕 · 大肥鱼</title>
+<style>
+  :root {
+    --bg: rgba(22, 24, 34, .94);
+    --card: rgba(255, 255, 255, .045);
+    --line: rgba(255, 255, 255, .085);
+    --txt: #EDEFF7;
+    --dim: #8C93A8;
+    --pink: #FF8FBB;
+    --blue: #8FB8FF;
+    --green: #6EE7A8;
+    --orange: #FFC062;
+    --red: #FF7A7A;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: transparent; overflow: hidden; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+    color: var(--txt);
+    padding: 7px;
+    -webkit-font-smoothing: antialiased;
+  }
+  #app {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, .09);
+    background:
+      radial-gradient(120% 60% at 10% 0%, rgba(255, 143, 187, .16), transparent 60%),
+      radial-gradient(100% 55% at 95% 10%, rgba(143, 184, 255, .14), transparent 58%),
+      linear-gradient(160deg, rgba(32, 35, 50, .96), rgba(17, 19, 27, .97));
+    box-shadow: 0 24px 70px rgba(0, 0, 0, .48), inset 0 1px 0 rgba(255, 255, 255, .06);
+    backdrop-filter: blur(34px) saturate(1.55);
+    overflow: hidden;
+    animation: fade .22s ease-out;
+  }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+  .head {
+    height: 56px;
+    flex: 0 0 56px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px 0 14px;
+    -webkit-app-region: drag;
+    border-bottom: 1px solid rgba(255, 255, 255, .06);
+    background: linear-gradient(180deg, rgba(255, 255, 255, .035), transparent);
+  }
+  .logo {
+    width: 30px; height: 30px; border-radius: 10px;
+    display: grid; place-items: center;
+    background: linear-gradient(145deg, #FFA9CB, #FF7FB2 55%, #B08CFF);
+    box-shadow: 0 4px 14px rgba(255, 127, 178, .32), inset 0 1px 0 rgba(255, 255, 255, .5);
+    color: #3a1426; font-size: 15px;
+    flex: 0 0 auto;
+  }
+  .titles { min-width: 0; flex: 1; }
+  .titles h1 { margin: 0; font-size: 13.5px; font-weight: 700; letter-spacing: .3px; }
+  .titles p { margin: 2px 0 0; font-size: 10.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pill {
+    flex: 0 0 auto;
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 23px; padding: 0 9px; border-radius: 999px;
+    font-size: 10.5px; color: var(--dim);
+    background: rgba(255, 255, 255, .055); border: 1px solid var(--line);
+  }
+  .pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); box-shadow: 0 0 0 3px rgba(255,255,255,.03); }
+  .pill.live { color: var(--green); }
+  .pill.live i { background: var(--green); animation: pulse 1.6s ease-in-out infinite; }
+  .pill.busy { color: var(--orange); }
+  .pill.busy i { background: var(--orange); animation: pulse 1s ease-in-out infinite; }
+  .pill.bad { color: var(--red); }
+  .pill.bad i { background: var(--red); }
+  @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.82); } }
+  .headbtn {
+    -webkit-app-region: no-drag;
+    width: 28px; height: 28px; border-radius: 9px; border: 0; cursor: pointer;
+    background: rgba(255, 255, 255, .06); color: var(--dim); font-size: 15px; line-height: 1;
+    display: grid; place-items: center;
+    transition: background .15s, color .15s, transform .12s;
+  }
+  .headbtn:hover { background: rgba(255, 122, 122, .2); color: #fff; }
+  .headbtn:active { transform: scale(.92); }
+
+  main { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px 14px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.14) transparent; }
+  main::-webkit-scrollbar { width: 6px; }
+  main::-webkit-scrollbar-thumb { background: rgba(255,255,255,.14); border-radius: 99px; }
+
+  .screen {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 13px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, .1);
+    background:
+      radial-gradient(90% 90% at 30% 20%, rgba(143, 184, 255, .12), transparent 70%),
+      linear-gradient(145deg, #10131b, #0a0c12);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .05);
+  }
+  .screen img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .35s ease; }
+  .screen img.on { opacity: 1; }
+  .empty {
+    position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+    color: var(--dim); font-size: 11.5px; line-height: 1.7; padding: 18px;
+  }
+  .empty b { display: block; font-size: 22px; margin-bottom: 4px; filter: grayscale(.2); }
+  .scan {
+    position: absolute; left: 0; right: 0; height: 28%;
+    background: linear-gradient(180deg, transparent, rgba(143, 184, 255, .13) 55%, rgba(143, 184, 255, .28) 92%, transparent);
+    border-bottom: 1px solid rgba(143, 184, 255, .55);
+    animation: scan 4.6s linear infinite;
+    pointer-events: none; opacity: .7;
+  }
+  @keyframes scan { 0% { transform: translateY(-120%); } 100% { transform: translateY(460%); } }
+  .corner { position: absolute; width: 14px; height: 14px; border-color: rgba(255, 255, 255, .5); border-style: solid; border-width: 0; pointer-events: none; }
+  .corner.tl { left: 9px; top: 9px; border-left-width: 1.5px; border-top-width: 1.5px; border-radius: 4px 0 0 0; }
+  .corner.tr { right: 9px; top: 9px; border-right-width: 1.5px; border-top-width: 1.5px; border-radius: 0 4px 0 0; }
+  .corner.bl { left: 9px; bottom: 9px; border-left-width: 1.5px; border-bottom-width: 1.5px; border-radius: 0 0 0 4px; }
+  .corner.br { right: 9px; bottom: 9px; border-right-width: 1.5px; border-bottom-width: 1.5px; border-radius: 0 0 4px 0; }
+  .hud {
+    position: absolute; left: 10px; right: 10px; bottom: 9px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 9.5px; color: rgba(255, 255, 255, .76);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, .8);
+  }
+  .hud .grow { flex: 1; }
+  .meter { width: 54px; height: 4px; border-radius: 99px; background: rgba(255, 255, 255, .18); overflow: hidden; }
+  .meter i { display: block; height: 100%; width: 0%; border-radius: 99px; background: linear-gradient(90deg, var(--green), var(--orange), var(--red)); transition: width .35s ease; }
+  .live-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+  .controls { display: flex; align-items: center; gap: 8px; margin-top: 11px; }
+  .btn {
+    height: 33px; padding: 0 13px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--line); background: rgba(255, 255, 255, .06); color: var(--txt);
+    font-size: 11.5px; font-weight: 600; font-family: inherit;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: background .15s, transform .12s, border-color .15s;
+  }
+  .btn:hover { background: rgba(255, 255, 255, .11); }
+  .btn:active { transform: scale(.97); }
+  .btn.primary { background: linear-gradient(145deg, rgba(255, 143, 187, .95), rgba(255, 111, 166, .9)); border-color: transparent; color: #3a1226; box-shadow: 0 6px 18px rgba(255, 111, 166, .25); }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn:disabled { opacity: .5; cursor: default; transform: none; }
+  .spacer { flex: 1; }
+  .switch { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--dim); cursor: pointer; user-select: none; }
+  .switch input { display: none; }
+  .switch .track { width: 30px; height: 17px; border-radius: 99px; background: rgba(255, 255, 255, .12); position: relative; transition: background .18s; }
+  .switch .track::after { content: ""; position: absolute; width: 13px; height: 13px; left: 2px; top: 2px; border-radius: 50%; background: #fff; opacity: .8; transition: transform .18s, opacity .18s; }
+  .switch input:checked + .track { background: rgba(255, 143, 187, .75); }
+  .switch input:checked + .track::after { transform: translateX(13px); opacity: 1; }
+  .sel {
+    height: 28px; border-radius: 8px; border: 1px solid var(--line);
+    background: rgba(255, 255, 255, .06); color: var(--txt); font-size: 11px; padding: 0 6px; font-family: inherit;
+  }
+
+  .sec-title { display: flex; align-items: baseline; gap: 8px; margin: 16px 2px 8px; }
+  .sec-title h2 { margin: 0; font-size: 11.5px; letter-spacing: .6px; color: #C9CEE0; font-weight: 700; }
+  .sec-title span { font-size: 10px; color: var(--dim); }
+  .sec-title .line { flex: 1; height: 1px; background: linear-gradient(90deg, var(--line), transparent); }
+
+  #comments { display: flex; flex-direction: column; gap: 8px; min-height: 60px; padding-bottom: 4px; }
+  .cmt {
+    align-self: flex-start; max-width: 96%;
+    padding: 9px 11px 8px; border-radius: 12px 12px 12px 4px;
+    background: linear-gradient(160deg, rgba(255, 143, 187, .14), rgba(255, 255, 255, .045));
+    border: 1px solid rgba(255, 143, 187, .18);
+    font-size: 12px; line-height: 1.62; color: #F4EEF3;
+    animation: pop .22s ease-out;
+  }
+  .cmt .t { display: block; margin-top: 3px; font-size: 9.5px; color: rgba(255, 255, 255, .38); }
+  .cmt.err { background: rgba(255, 122, 122, .1); border-color: rgba(255, 122, 122, .25); color: #FFC9C9; }
+  .cmt.you { align-self: flex-end; border-radius: 12px 12px 4px 12px; background: rgba(143, 184, 255, .12); border-color: rgba(143, 184, 255, .2); }
+  @keyframes pop { from { opacity: 0; transform: translateY(4px) scale(.985); } to { opacity: 1; transform: none; } }
+  .blank { color: var(--dim); font-size: 11px; text-align: center; padding: 14px 8px; line-height: 1.7; }
+
+  .foot { flex: 0 0 auto; padding: 9px 14px 11px; border-top: 1px solid rgba(255, 255, 255, .055); display: flex; align-items: center; gap: 8px; font-size: 9.5px; color: rgba(255, 255, 255, .34); }
+  .foot .dot { width: 3px; height: 3px; border-radius: 50%; background: rgba(255,255,255,.25); }
+  .foot .model { margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
+  :focus-visible { outline: 2px solid rgba(143, 184, 255, .75); outline-offset: 2px; border-radius: inherit; }
+  button:focus:not(:focus-visible) { outline: none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="head">
+    <div class="logo">👁</div>
+    <div class="titles">
+      <h1>看屏幕</h1>
+      <p id="sub">她正看着你的桌面</p>
+    </div>
+    <div class="pill" id="pill"><i></i><span id="pillText">准备中</span></div>
+    <button class="headbtn" id="close" title="关闭" aria-label="关闭">✕</button>
+  </header>
+
+  <main id="scroll">
+    <div class="screen" id="screen">
+      <img id="shot" alt="屏幕预览" />
+      <div class="empty" id="empty"><div><b>👀</b>点下面的「开始看」<br />她就能瞄见你在忙什么</div></div>
+      <div class="scan" id="scan"></div>
+      <span class="corner tl"></span><span class="corner tr"></span>
+      <span class="corner bl"></span><span class="corner br"></span>
+      <div class="hud">
+        <span class="live-dot"></span><span id="clock">--:--:--</span>
+        <span class="grow"></span>
+        <span>变化</span>
+        <span class="meter"><i id="meter"></i></span>
+        <span id="diff">0.00</span>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="btn primary" id="toggle">开始看</button>
+      <button class="btn" id="look">让她说一句</button>
+      <span class="spacer"></span>
+      <label class="switch" title="她点评时是否读出来">
+        <input type="checkbox" id="speak" />
+        <span class="track"></span>
+        <span>念出来</span>
+      </label>
+      <select class="sel" id="interval" title="抓屏间隔">
+        <option value="1">1 秒</option>
+        <option value="1.6">1.6 秒</option>
+        <option value="2.5">2.5 秒</option>
+        <option value="4">4 秒</option>
+      </select>
+    </div>
+
+    <div class="sec-title"><h2>她看到的</h2><span id="count">0 句</span><span class="line"></span></div>
+    <div id="comments"><div class="blank">还没有点评。<br />画面变化时，她会自己开口。</div></div>
+  </main>
+
+  <footer class="foot">
+    <span>只在本机抓屏</span><span class="dot"></span>
+    <span>变化够大才送模型</span>
+    <span class="model" id="model">视觉模型：未配置</span>
+  </footer>
+</div>
+<script src="seewatch.js"></script>
+</body>
+</html>
+
