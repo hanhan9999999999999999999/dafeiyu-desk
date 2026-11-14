@@ -118,6 +118,7 @@ node bridge/mini-bridge.mjs --port 8899
 ```bash
 git clone https://github.com/FunAudioLLM/CosyVoice.git "<飞鱼目录>\cosyvoice"
 git -C "<飞鱼目录>\cosyvoice" checkout 074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc
+git -C "<飞鱼目录>\cosyvoice" submodule update --init --recursive
 ```
 
 然后在 **设置 → 声音与行为 →「环境」** 里填 `<飞鱼目录>`。CosyVoice 需要 Python 3.11、PyTorch 2.11.0+cu128 和约 14 GB 磁盘；一键安装仍是首选，手动方式只作为代理失效时的兜底。
