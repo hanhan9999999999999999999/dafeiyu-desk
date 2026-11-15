@@ -74,9 +74,28 @@ const evalJson = (out) => {
   try { return JSON.parse(m[1]); } catch (e) { return null; }
 };
 
+// 删测试目录：Electron 刚退出时文件句柄还没放干净，Windows 会甩 EPERM/EBUSY。
+// 这不是「设置没存住」，重试几次；最后一次还不行就留着（不影响断言，还能看现场）。
+async function resetDir(strict) {
+  for (let i = 0; i < 5; i += 1) {
+    try {
+      fs.rmSync(DIR, { recursive: true, force: true });
+      if (strict) fs.mkdirSync(DIR, { recursive: true });
+      return true;
+    } catch (e) {
+      await new Promise((r) => setTimeout(r, 250 * (i + 1)));
+    }
+  }
+  return false;
+}
+
 (async () => {
-  fs.rmSync(DIR, { recursive: true, force: true });
-  fs.mkdirSync(DIR, { recursive: true });
+  if (!(await resetDir(true))) {
+    // 上一次的残留删不掉：不能用旧目录接着测，否则读到的是上一轮的设置。
+    console.log("无法清空 " + DIR + "（有进程还占着），这次先跳过");
+    console.log("\n结果：" + pass + " 通过，" + fail + " 失败");
+    process.exit(fail ? 1 : 0);
+  }
 
   const a = await smoke("persist-write.js");
   check("第一次启动能写入一批设置", a.code === 0 && /settings:saved:/.test(a.out),
@@ -134,7 +153,8 @@ const evalJson = (out) => {
     check("快捷键回到默认唤出键", def.hotkeySummon === "CommandOrControl+Alt+F", JSON.stringify(def.hotkeySummon));
   }
 
-  fs.rmSync(DIR, { recursive: true, force: true });
+  // 收尾清目录：清不掉只提示，不改判结果 —— 断言已经全部跑完了。
+  if (!(await resetDir(false))) console.log("（测试目录这次没清掉，留着不影响结果）");
   console.log("\n结果：" + pass + " 通过，" + fail + " 失败");
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error((e && e.stack) || e); process.exit(2); });

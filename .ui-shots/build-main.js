@@ -37,5 +37,11 @@ const stub = `<style>
 </style>`;
 html = html.replace("</head>", stub + "\n</head>");
 
+// 5) 可选：把发送键画成「她正在说话」时的那一态（带 .stop），用来核对对比度
+if (process.argv.includes("--stop")) {
+  html = html.replace('<button class="send" id="dockSend"', '<button class="send stop" id="dockSend"');
+  html = html.replace(/(<button class="send stop" id="dockSend"[^>]*>)发送/, "$1停止");
+}
+
 fs.writeFileSync(path.join(__dirname, "page-main.html"), html);
 console.log("wrote page-main.html");

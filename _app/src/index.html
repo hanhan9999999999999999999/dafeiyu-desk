@@ -319,6 +319,21 @@
   #dock .send:hover { background: var(--acc-hi); }
   #dock .send:active { transform: scale(.92); }
   #dock .send:disabled { opacity: .32; box-shadow: none; cursor: default; }
+  /* 她正在说话时，这颗键变成「停止」：淡红实心 + 一道很轻的呼吸，
+     一眼能看出它现在不是发消息，而是打断。颜色不跟主题走，红就是红。 */
+  #dock .send.stop {
+    background: linear-gradient(180deg, #ff6b86, #e8455f);
+    box-shadow: 0 2px 10px rgba(232, 69, 95, .38);
+    animation: send-stop-breathe 1.8s ease-in-out infinite;
+  }
+  #dock .send.stop:hover { background: linear-gradient(180deg, #ff7d95, #ef526a); }
+  @keyframes send-stop-breathe {
+    0%, 100% { box-shadow: 0 2px 10px rgba(232, 69, 95, .34); }
+    50% { box-shadow: 0 2px 16px rgba(232, 69, 95, .58); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #dock .send.stop { animation: none; }
+  }
 
   /* ── 养成面板 ─────────────────────────────── */
   #petBtn,

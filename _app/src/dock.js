@@ -26,6 +26,37 @@
   // 养成面板开着的时候，输入条不能被自动收起——面板挂在它上面，条一收面板就跟着消失了。
   let held = false;
 
+  // 她是不是在出声 + 让她停下。走 FishVoice 的两个出口；
+  // 拿不到（模块还没加载完）时一律当「没在说」，不许把按钮卡在「停止」上。
+  function isSpeaking() {
+    try {
+      return !!(window.FishVoice && typeof window.FishVoice.isSpeaking === "function"
+        && window.FishVoice.isSpeaking());
+    } catch (e) { return false; }
+  }
+
+  function stopSpeak() {
+    try {
+      if (window.FishVoice && typeof window.FishVoice.stop === "function") window.FishVoice.stop();
+    } catch (e) { }
+  }
+
+  // 每 200ms 对一次状态：她说话时「发送」变成「停止」。
+  // 用轮询而不是让 voice.js 回调——播放会在很多条路上结束（播完、被打断、出错回落、
+  // 切换引擎），漏一条回调按钮就永远停在「停止」上；轮询只有一个状态来源。
+  let speakingNow = false;
+  function syncSpeak() {
+    const on = isSpeaking();
+    if (on === speakingNow) return;
+    speakingNow = on;
+    if (!sendBtn) return;
+    sendBtn.classList.toggle("stop", on);
+    sendBtn.textContent = on ? "停止" : "发送";
+    sendBtn.title = on ? "让她别说了" : "发送";
+    sendBtn.setAttribute("aria-label", on ? "让她停下" : "发送");
+  }
+  setInterval(syncSpeak, 200);
+
   const MAX_ROWS = 40;
 
   function setOpen(v) {
@@ -92,6 +123,12 @@
   }
 
   function send() {
+    // 她正在出声时，这颗键的语义是「停下」而不是「发送」——
+    // 标签也同步换过（见 syncSpeak）。打断是即时动作，不看输入框有没有字。
+    if (isSpeaking()) {
+      stopSpeak();
+      return;
+    }
     const text = String(input.value || "").trim();
     if (!text) return;
     setOpen(true);

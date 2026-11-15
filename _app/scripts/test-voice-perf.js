@@ -136,5 +136,16 @@ ok("首句早切要传 !firstStream（只在还没开口时生效）", /takeSent
 ok("头 3 秒按 150ms 催（首声窗口里每多等 200ms 就直接晚 200ms）",
   /waited < 3000 \? 150/.test(voice), "轮询间隔被改回去了");
 
+// ── ⑧ 说话时的「停止」：想让她闭嘴不该只能去按麦克风键 ─────────────
+const dockSrc = read("src/dock.js");
+const mainHtml = read("src/index.html");
+ok("语音模块暴露了 isSpeaking / stop", /isSpeaking:\s*\(\)\s*=>/.test(voice) && /\bstop:\s*\(\)\s*=>/.test(voice));
+ok("输入条按状态轮询（不是靠回调，漏一条就会卡在「停止」上）", /setInterval\(syncSpeak, 200\)/.test(dockSrc));
+ok("说话时发送键变成「停止」", /sendBtn\.classList\.toggle\("stop"/.test(dockSrc));
+ok("说话时点发送是打断，不是发消息", /if \(isSpeaking\(\)\) \{\s*\n\s*stopSpeak\(\);/.test(dockSrc));
+ok("停止态有独立配色（红，不跟主题走）", /#dock \.send\.stop\s*\{/.test(mainHtml));
+ok("停止态的呼吸动画尊重 prefers-reduced-motion",
+  /@media \(prefers-reduced-motion: reduce\) \{\s*\n\s*#dock \.send\.stop \{ animation: none; \}/.test(mainHtml));
+
 console.log("\n结果：" + pass + " 通过，" + fail + " 失败");
 process.exitCode = fail ? 1 : 0;

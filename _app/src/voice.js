@@ -2049,6 +2049,11 @@
     // 那一步在 finishReply 里，是这一轮真正修掉的东西。
     __finishReply: (text) => finishReply(text),
     isOn: () => enabled,
+    // 她此刻是不是在出声（时间轴播放器或 <audio> 任一在播）。
+    // 输入条拿它把「发送」临时换成「停止」——想让她闭嘴时不用去按麦克风键。
+    isSpeaking: () => currentAudio !== null || !!pcmPlayer,
+    // 只要停下这一句，不动语音开关。输入条那颗「停止」走这里。
+    stop: () => stopPlayback(),
     // 口型：0~1，播放时由真实音频振幅驱动；没在播就是 0。
     // renderer 每帧读它去写 ParamMouthOpenY。
     mouth: () => mouthLevel,

@@ -47,7 +47,7 @@
 
 ### 新增
 
-- **`scripts/test-voice-perf.js`（`pnpm test:voice-perf`，47 条）**：把这一版「快起来」的四个支点
+- **`scripts/test-voice-perf.js`（`pnpm test:voice-perf`，53 条）**：把这一版「快起来」的四个支点
   钉成回归测试 —— hop 每句复位、预热不在请求路径上、参考音粘性 ≥20 秒、客户端走时间轴播放；
   外加上报链路（`firstMs`/`audioSec`/`cachedSentences` → `/health` → `status()` → 设置页）与
   「`cudnn.benchmark` 不许再打开」这条教训。首块门槛顺手抽成纯函数 `feiyuFirstBlockReady()`，
@@ -65,6 +65,11 @@
 - **一键体检多了「开口速度」一项**：读引擎自己报的 `firstMs` / RTF / 是否整段命中缓存，
   超过 3 秒才判「慢」并给出下一步（先关闲置自动关闭再听一次）。没有它，用户只能说「感觉有点慢」，
   慢在准备、排队还是算力上没人知道。
+- **主窗口的「发送」会在她说话时变成「停止」**（`src/dock.js` + `src/index.html`）：以前想让她闭嘴，
+  只能去按麦克风键（那颗键是「小声点儿」）或静音整条语音——输入条上没有任何打断入口。
+  现在她一出声音，发送键就换成红色「停止」并带一道很轻的呼吸（`prefers-reduced-motion` 下不动），
+  点它只停这一句，不关语音、不删输入框里的字。状态用 200ms 轮询而不是回调：播放的结束路径有
+  播完 / 被打断 / 出错回落 / 切引擎好几条，漏一条就会永远卡在「停止」上。
 - **`test-persist` 不再被环境噪声判红**：同一个 `verify` 里前面的冒烟刚退出、Chromium 的 GPU
   进程还没放干净时，这一次启动会以 `exit=2` 收场并只打一行 `Gpu Cache Creation failed` ——
   以前这会红成「设置没存住」。现在这两种噪声（GPU 缓存 / 单例锁）会自动重试一次，
@@ -74,7 +79,7 @@
 
 ### 校验
 
-- `verify-src` **1045 通过 0 失败**；`test:voice-fast` **14 通过 0 失败**；`test:voice-perf` **47 通过 0 失败**；`audit-privacy` 13 项、`audit-listeners` 7 项、`test-persist` 31 项、`test-diag` 15 项全绿；`node --check` 全绿。
+- `verify-src` **1045 通过 0 失败**；`test:voice-fast` **14 通过 0 失败**；`test:voice-perf` **53 通过 0 失败**；`audit-privacy` 13 项、`audit-listeners` 7 项、`test-persist` 31 项、`test-diag` 15 项全绿；`node --check` 全绿。
 
 > 发版标记：`docs/VOICE-1.6.0.md` 是**技术说明**，不是发版说明。1.6.0 还没打包，等 `npm run build`
 > 出 `大肥鱼-1.6.0-安装包.exe` 之后，`docs/RELEASE-1.6.0.md` 才会带上真实体积与 SHA-256
