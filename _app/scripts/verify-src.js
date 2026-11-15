@@ -583,7 +583,7 @@ if (!fs.existsSync(changelog)) {
   t14("中文路径段验的是「主程序落在目标路径」", /装进中文目录后主程序在目标路径/.test(inst));
   t14("中文路径段盯住父目录有没有被塞东西", /中文路径安装没有往父目录里塞东西/.test(inst));
   t14("中文路径段验卸载后不留文件", /中文路径卸载后没有留下文件/.test(inst));
-  t14("安装器调用统一走 runInstaller", /const runInstaller = \(installer, dir, timeoutMs\) =>/.test(inst));
+  t14("安装器调用统一走 runInstaller", /const runInstaller = async \(installer, dir, timeoutMs\) =>/.test(inst));
   t14("传参用 windowsVerbatimArguments（/D= 不能带引号）",
     /windowsVerbatimArguments: true/.test(inst));
   t14("中文路径段可以跳过（SKIP_CJK）", /process\.env\.SKIP_CJK !== "1"/.test(inst));
