@@ -828,10 +828,13 @@ function stats() {
   return { keys: keys.length, total, idle: idleLines().length };
 }
 
-const API = { LINES, IDLE_KEYS, pick, idleLines, stats, timeKey, idleKey, isWeekend, stateKey };
+// 名字必须独有：index.html 里的脚本共用一个顶层作用域，
+// 叫 API 会跟 motion-pick.js 撞车（Identifier 'API' has already been declared），
+// 撞了以后后加载的那个文件整段不执行。真机上踩过一次。
+const FISH_LINES_API = { LINES, IDLE_KEYS, pick, idleLines, stats, timeKey, idleKey, isWeekend, stateKey };
 
 // 渲染进程按普通 <script> 加载：挂到 window 上给 renderer 用。
-if (typeof window !== "undefined") window.FishLines = API;
+if (typeof window !== "undefined") window.FishLines = FISH_LINES_API;
 // 主进程要算预合成清单，得能 require 进来。两份出口指的是同一个对象。
-if (typeof module !== "undefined" && module.exports) module.exports = API;
+if (typeof module !== "undefined" && module.exports) module.exports = FISH_LINES_API;
 

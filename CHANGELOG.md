@@ -1,5 +1,24 @@
 # 更新日志
 
+## 1.5.1 — 2026-11-15
+
+1.5.0 打包后第一次真机启动，日志里逮到一个只有浏览器才会犯的错——修掉，并补了守护测试。
+
+### 修复
+
+- **表情与动作的衔接完全没生效（`Identifier 'API' has already been declared`）**：`src/lines.js` 和 `src/motion-pick.js` 都写了 `const API = {...}`，而 `index.html` 里用 `<script src>` 加载的这些经典脚本**共用同一个顶层作用域**——后加载的 `motion-pick.js` 整段抛 `SyntaxError` 不执行，`window.FishMotionPick` 从来不存在，`renderer.js` 于是安静地退回旧逻辑。
+  这个坑单元测试看不出来：`require()` 有模块作用域，两个文件各叫各的 `API` 一点问题都没有，所以 1.5.0 的 1041 条断言全绿也没拦住它。
+  现在两个文件分别改名 `FISH_LINES_API` / `FISH_PICK_API`，并加了注释写明原因。
+
+### 新增
+
+- **`scripts/test-globals.js`（`pnpm test:globals`）**：解析 `index.html` / `settings.html` / `adapter.html` 里所有本地 `<script src>`，逐文件扫顶层 `const` / `let` / `var` / `class` 声明，只要一个名字被两个文件同时声明就红；另外单独禁掉 `API` / `Root` / `Lib` / `Utils` / `Cfg` / `Opts` 这类泛名当顶层变量。这类错误在 require 世界里永远抓不到，只能靠显式盯着。
+
+### 校验
+
+- `verify-src` 1041 通过 0 失败；`test:globals` 7 通过；`test:motion-pick` 23 通过；`test:idle` 18 通过。
+- 真机复跑：本地服务 7801、热键四个全部注册、桥接自检通（外部桥 `http://127.0.0.1:8899`）、模型 `dafeiyu · 大肥鱼` 载入、日志无 `SyntaxError`、无「motion-pick.js 没加载」。
+
 ## 1.5.0 — 2026-11-15
 
 这一版是「让人敢用、出了问题能自己好」的一版。

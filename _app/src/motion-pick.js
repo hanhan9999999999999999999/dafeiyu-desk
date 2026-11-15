@@ -150,7 +150,10 @@ function handoff(prevDur, prevElapsed, nextDur) {
   return Math.max(0.12, Math.min(base, cap, 0.62));
 }
 
-const API = {
+// 名字必须是独有的：index.html 里所有脚本共用一个顶层作用域，
+// 叫 API 会跟 lines.js 撞车（"Identifier 'API' has already been declared"），
+// 结果是这一整个文件静默不执行、衔接逻辑退回旧版。真机上踩过一次。
+const FISH_PICK_API = {
   SCENE_BIAS,
   EXPR_HOLD,
   moodOf,
@@ -160,5 +163,5 @@ const API = {
 };
 
 // 双出口：渲染层用 <script> 引（window.FishMotionPick），测试与主进程用 require。
-if (typeof window !== "undefined") window.FishMotionPick = API;
-if (typeof module !== "undefined" && module.exports) module.exports = API;
+if (typeof window !== "undefined") window.FishMotionPick = FISH_PICK_API;
+if (typeof module !== "undefined" && module.exports) module.exports = FISH_PICK_API;
