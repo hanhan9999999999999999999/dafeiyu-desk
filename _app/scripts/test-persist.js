@@ -36,7 +36,7 @@ const WANT = {
   viewBox: { y: 0.11, h: 0.28, pack: "dafeiyu" },
 };
 
-function smoke(evalFile, wait) {
+function smokeOnce(evalFile, wait) {
   return new Promise((resolve) => {
     const p = spawn(process.execPath, [
       path.join(ROOT, "scripts", "smoke-electron.js"),
@@ -47,8 +47,25 @@ function smoke(evalFile, wait) {
     let out = "";
     p.stdout.on("data", (d) => { out += d; });
     p.stderr.on("data", (d) => { out += d; });
-    p.on("exit", (code) => resolve({ code, out }));
+    p.on("exit", (code) => resolve({ code, out, retried: false }));
   });
+}
+
+// GPU 缓存 / 单例锁是环境噪声，不是「设置没存住」：同一个 verify 里前面的冒烟刚退，
+// Chromium 的 GPU 进程还没放干净时，这一次启动会以 exit=2 收场并只打一行
+// 「Gpu Cache Creation failed」。这种失败重试一次就过，不该判功能失败。
+const ENV_NOISE = /Gpu Cache Creation failed|Failed to create GPU cache|SingletonLock|Another instance/i;
+
+async function smoke(evalFile, wait) {
+  const first = await smokeOnce(evalFile, wait);
+  if (first.code === 0 || !ENV_NOISE.test(first.out)) return first;
+  await new Promise((r) => setTimeout(r, 1500));
+  const again = await smokeOnce(evalFile, wait);
+  again.retried = true;
+  if (again.code === 0) return again;
+  // 两次都坏：把「重试过」这件事写进输出，失败信息才不会被误解成功能回归。
+  again.out += "\n[retry] 第一次失败于环境噪声（GPU 缓存/单例锁），重试一次仍失败";
+  return again;
 }
 
 const evalJson = (out) => {

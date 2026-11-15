@@ -638,9 +638,24 @@
     }
   }
 
+  // 首句愿意在逗号处先切一小口：她开口之前不必等第一个句号落下来。
+  // 返回要切到的下标（不含），不够长就 -1 —— 太短的一口（「嗯，」）念出来像卡了一下。
+  // 只看第一个逗号：它都还不够长，后面的也只会更长，没必要继续找。
+  function firstCutAt(rest) {
+    const s = String(rest || "");
+    for (let i = 0; i < s.length; i += 1) {
+      const ch = s[i];
+      if (ch !== "，" && ch !== "," && ch !== "、") continue;
+      const head = s.slice(0, i + 1);
+      const spoken = head.replace(/[\s\p{P}]/gu, "").length;
+      return spoken >= 9 ? i + 1 : -1;
+    }
+    return -1;
+  }
+
   // 把累计文本里「已经能念」的句子切出来，剩下的留在 rest 里等下一段。
   // 和 splitSentences 的区别：这个是流式的，不能等整段；也不能切太碎。
-  function takeSentences(buf, flush) {
+  function takeSentences(buf, flush, firstCut) {
     const s = String(buf || "");
     const out = [];
     let start = 0;
@@ -656,6 +671,16 @@
         out.push(seg);
         start = end;
         i = end - 1;
+      }
+    }
+    // 还没等到句号、但这半句已经够念了：只有在「一句话都还没开口」时才提前切，
+    // 后面几句照旧等句号，免得整段变成一顿一顿的碎句子。
+    if (!flush && firstCut && out.length === 0) {
+      const rest = s.slice(start);
+      const cut = firstCutAt(rest);
+      if (cut > 0) {
+        out.push(rest.slice(0, cut).trim());
+        start += cut;
       }
     }
     if (!flush && s.length - start >= 30) {
@@ -801,8 +826,9 @@
 
     while (Date.now() < deadline && mark === speechAbort) {
       const waited = Date.now() - started;
-      // 前 18 秒她通常正在出字，催得勤一点；之后多半在跑工具，放慢。
-      await sleep(waited < 18000 ? 350 : 800);
+      // 前 3 秒是「她刚开口」的窗口，催得最勤：这一段每一次多等 200ms，
+      // 首声就直接晚 200ms。3-18 秒按时出字，之后多半在跑工具，放慢。
+      await sleep(waited < 3000 ? 150 : waited < 18000 ? 350 : 800);
       let j;
       try {
         const u = BASE + "/api/state?t=" + encodeURIComponent(t) + "&since=" + since;
@@ -833,7 +859,7 @@
       full = txt;
       paint(false);
 
-      const take = takeSentences(buf, false);
+      const take = takeSentences(buf, false, !firstStream);
       buf = take.rest;
       for (const sent of take.list) speakSentence(sent);
 

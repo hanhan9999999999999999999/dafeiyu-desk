@@ -114,5 +114,27 @@ ok("首块太短（0.4s 语气词）才等第二块", feiyuFirstBlockReady(1, 0.
 ok("第二块到了无论如何都开播（不能无限等）", feiyuFirstBlockReady(2, 0.1, true) === true);
 ok("没有时间轴播放器时一块就够（<audio> 顺序播）", feiyuFirstBlockReady(1, 0.2, false) === true);
 
+// ── ⑦ 首句早切：别为了等第一个句号把开口拖后半秒 ────────────────
+const cutSrc = between(voice, "function firstCutAt(", "// 把累计文本里")
+  + between(voice, "function takeSentences(", "// 边等文字、边合成、边播");
+// eslint-disable-next-line no-new-func
+const takeSentences = new Function(cutSrc + "\nreturn takeSentences;")();
+const tk = (buf, firstCut) => takeSentences(buf, false, firstCut).list;
+
+ok("首句等句号：没有标点时一个字都不切", tk("我刚刚看了一眼你的屏幕", true).length === 0);
+ok("首句在逗号处先切一小口", JSON.stringify(tk("我刚刚看了一眼你的屏幕，", true)) === JSON.stringify(["我刚刚看了一眼你的屏幕，"]));
+ok("同一个逗号，非首句不切（后面几句照旧等句号）", tk("我刚刚看了一眼你的屏幕，", false).length === 0);
+ok("太短的一口（「嗯，」）不单独念", tk("嗯，我把语音那条路又量了一遍，", true).length === 0);
+{
+  // 句号优先，且「短尾巴」（<6 字）继续攒着 —— 这两条是原有行为，别被首句早切改掉。
+  const r = takeSentences("我还没看到你的屏幕。我这就去。", false, true);
+  ok("有句号时照旧按句号切（首句早切不许盖掉它）",
+    JSON.stringify(r.list) === JSON.stringify(["我还没看到你的屏幕。"]));
+  ok("句号之后的短尾巴留在 rest 里等下一段", r.rest === "我这就去。");
+}
+ok("首句早切要传 !firstStream（只在还没开口时生效）", /takeSentences\(buf, false, !firstStream\)/.test(voice));
+ok("头 3 秒按 150ms 催（首声窗口里每多等 200ms 就直接晚 200ms）",
+  /waited < 3000 \? 150/.test(voice), "轮询间隔被改回去了");
+
 console.log("\n结果：" + pass + " 通过，" + fail + " 失败");
 process.exitCode = fail ? 1 : 0;
