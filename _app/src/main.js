@@ -4302,6 +4302,29 @@ async function diagRun() {
     push("feiyu", "飞鱼引擎", "warn", "读不到状态：" + String((e && e.message) || e), "不影响说话，只是用不上这个声线");
   }
 
+  // 6.5 开口速度：引擎自己报的实测首声（没有这一项，用户只能说「感觉有点慢」）
+  try {
+    const f = await engineFeiyu();
+    const st = (f && typeof f.status === "function") ? f.status() : {};
+    const perf = (st && st.perf) || null;
+    const first = perf && Number(perf.firstMs) ? Number(perf.firstMs) : 0;
+    if (!st || !st.ready) {
+      push("feiyuPerf", "开口速度", "skip", "引擎没加载，这一项要等她说过一句话才有数据", "");
+    } else if (!first) {
+      push("feiyuPerf", "开口速度", "skip", "引擎在跑，但还没说过话", "说一句「你好」再体检一次，就有实测首声了");
+    } else {
+      const sec = (first / 1000).toFixed(2);
+      const rtf = Number(perf.rtf) || 0;
+      const cached = Number(perf.cachedSentences) || 0;
+      const slow = first > 3000;
+      push("feiyuPerf", "开口速度", slow ? "warn" : "ok",
+        "上次首声 " + sec + " 秒 · " + (cached ? "整段命中缓存" : "合成 " + rtf.toFixed(2) + "× 实时"),
+        slow ? "首声超过 3 秒：先关掉「闲置自动关闭」再听一次；还是慢就把这份报告发出去" : "");
+    }
+  } catch (e) {
+    push("feiyuPerf", "开口速度", "skip", "读不到实测数据（可选项）", "");
+  }
+
   // 7 XTTS / 8 RVC / 9 识别模型：这三个都是可选的，坏了只影响对应功能
   try {
     const x = await xttsSetupStatus();

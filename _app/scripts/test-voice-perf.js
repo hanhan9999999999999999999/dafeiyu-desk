@@ -85,6 +85,15 @@ ok("首声分档上色（2 秒绿 / 3 秒黄）", /2000/.test(srender) && /3000/
 ok("概览有「开口速度」卡", /id="ovFirst"/.test(html));
 ok("概览卡真的去读引擎指标", /feiyu_status/.test(shell) && /perf/.test(shell));
 
+// 体检里那一项：没有它，用户只能说「感觉有点慢」，慢在哪一环没人知道。
+const mainSrc = read("src/main.js");
+const diagBlock = between(mainSrc, 'push("feiyuPerf"', "// 7 XTTS");
+ok("体检里有「开口速度」这一项", /开口速度/.test(diagBlock));
+ok("体检读的是引擎实测的 firstMs", /Number\(perf\.firstMs\)/.test(mainSrc));
+ok("超过 3 秒才判慢（别把正常波动报成故障）", /first > 3000/.test(diagBlock));
+ok("引擎没加载时说清楚要等她说过一句话，而不是报错", /skip/.test(diagBlock));
+
+
 // ── ⑤ 客户端播放：一根时间轴 ─────────────────────────────────
 ok("有 createPcmPlayer（时间轴播放器）", /function createPcmPlayer\(/.test(voice));
 ok("块是 push 进时间轴，而不是每块建 Blob URL", /player\.push\(bytes\)/.test(voice));
