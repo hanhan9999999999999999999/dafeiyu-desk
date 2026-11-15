@@ -59,8 +59,12 @@ async function waitTarget(ms) {
   try {
     const t = await waitTarget(WAIT_MS);
     if (!t) { console.log("[diag] 连不上调试端口 " + PORT); process.exit(2); }
-    // 等模型/首帧稳一下：诊断包会读 boot-timing.txt，那是 did-finish-load 之后才写的
-    await sleep(4000);
+    // 等模型/首帧稳一下：诊断包会读 boot-timing.txt，那是 did-finish-load 之后才写的。
+    // 固定等 4 秒不够 —— 模型大的时候首帧要十几秒，于是这条断言会在慢机器上假红。
+    // 改成轮询这个文件真的出现，最多 25 秒。
+    const bootFile = path.join(ud, "boot-timing.txt");
+    const bootDeadline = Date.now() + 25000;
+    while (Date.now() < bootDeadline && !fs.existsSync(bootFile)) await sleep(400);
 
     const probe = "JSON.stringify((function(){return {has:typeof (window.deskfish||{}).diagExportTo}})())";
     // 注意：lib/cdp 的 evalOn 已经把 JSON 解过一次了，这里拿到的是对象，别再 JSON.parse
