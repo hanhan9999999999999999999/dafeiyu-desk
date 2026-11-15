@@ -98,7 +98,10 @@
       $("hdrSub").textContent = act ? "当前 · " + (act.displayName || act.id) : "";
       renderList(r.active);
       const want = new URLSearchParams(location.search).get("id");
-      const first = want || r.active || (S.packs[0] && S.packs[0].id);
+      let first = want || r.active || (S.packs[0] && S.packs[0].id);
+      // 兜一层：万一 active 或列表项给的是对象，别让它拼成 [object Object] 打出去
+      if (first && typeof first === "object") first = first.id || first.pack || "";
+      if (first && typeof first !== "string") first = String(first);
       if (first) select(first, { silent: true });
       else showEmpty();
     } catch (e) {
@@ -253,6 +256,9 @@
   // ── 选中一个模型 ──────────────────────────────────────────
   let selectSeq = 0;
   async function select(id, opts) {
+    // id 只认字符串。曾经有一次拿到对象，拼出来是 /api/packs/[object Object]，
+    // 后台回「没有这个接口」，界面上看起来像前后端版本对不上 —— 其实只是参数形状错了。
+    if (id && typeof id === "object") id = id.id || id.pack || id.name || "";
     if (!id) return;
     if (S.dirty && !opts?.silent && !confirm("当前模型有没保存的改动，切走就丢了。继续？")) return;
     const seq = ++selectSeq;
@@ -720,6 +726,18 @@
     ParamBreath: "breath",
     ParamEyeOpenL: "eyeLOpen", ParamEyeOpenR: "eyeROpen",
     ParamMouthOpen: "mouthOpen", ParamMouthFormY: "mouthForm",
+    // ---- 表演曲线用的表情参数 ----
+    // LumenAct 那 97 段曲线是按参数名写进动作库的，预览时要能一路映射到槽位，
+    // 否则「试演」在适配器里播不动、只能存盘后回主程序看。这里补的就是这条通路。
+    EyeSmile: "eyeSmile", ParamEyeSmile: "eyeSmile",
+    ParamBrowLY: "browLY", ParamBrowRY: "browRY",
+    ParamBrowLForm: "browLY", ParamBrowRForm: "browRY",
+    ParamBrowLAngle: "browLAngle", ParamBrowRAngle: "browRAngle",
+    BrowInnerUp: "browInnerUp",
+    ShockL: "shockL", ShockR: "shockR",
+    LCry: "cryL", RCry: "cryR",
+    Angry: "angry", PupilX: "pupilX",
+    Mouthpucker: "mouthPucker", CheeckPuff: "cheekPuff", ParamCheek: "cheekPuff",
   };
 
   let paramMapCache = null;
@@ -773,6 +791,47 @@
     toast("内置动作 " + name + " · " + mapped.length + "/" + curves.length + " 条曲线");
     // 播完自动收，别一直停在最后一帧
     setTimeout(() => { if (PB && PB.name === name) PB = null; }, dur * 1000 + 80);
+  }
+
+  // 表情试演：直接播 LumenAct 那套曲线。
+  // 它和内置动作共用同一个播放器（PB），因为格式完全一样 —— 都是 [[参数索引, [[t,v]...]]]。
+  // 唯一区别：曲线里的键是**槽位 id**（angleX、eyeSmile），不是参数名，
+  // 所以要先按 S.cfgs["core-params"] 翻译成本模型真实的参数名。
+  // 翻译不上就跳过那一条 —— 换模型之后同一个按钮照样能播，只是少几条曲线。
+  function playExprStyleById(id) {
+    const d = window.FishExprCurves;
+    if (!d || !d.styles) { toast("表演库没加载（expr-curves.js）", "bad"); return; }
+    const st = d.styles[String(id)];
+    if (!st) { toast("没有 " + id + " 这一段", "bad"); return; }
+    if (!S.model || !S.idx) { toast("模型还没加载好", "bad"); return; }
+    if (!Array.isArray(st.curves) || !st.curves.length) { toast("这一段没有曲线", "bad"); return; }
+    const cp = S.cfgs["core-params"] || {};
+    const slotInfo = d.slots || {};
+    const mapped = [];
+    let skipped = 0;
+    let dur = 0;
+    for (const pair of st.curves) {
+      const slotId = pair[0];
+      const pts = pair[1];
+      if (!Array.isArray(pts) || !pts.length) continue;
+      dur = Math.max(dur, pts[pts.length - 1][0]);
+      // 用户手绑优先；没绑就用槽位表里的 canon 猜；都没有才算缺
+      const real = cp[slotId] || (slotInfo[slotId] && slotInfo[slotId].canon);
+      if (!real) { skipped += 1; continue; }
+      const i = S.idx[real];
+      if (i === undefined) { skipped += 1; continue; }
+      mapped.push([i, pts]);
+    }
+    if (!mapped.length) {
+      toast("这个模型一个表情参数都没匹配上 —— 先去第 1 步绑定表情参数", "bad");
+      return;
+    }
+    // neutral 段 52 秒，整段播完像卡住；截到 9 秒，短片反而更容易看清这一段的性格
+    const cap = Math.min(dur, 9);
+    PB = { name: "expr:" + id, curves: mapped, t0: performance.now(), dur: cap };
+    toast("试演 " + (st.label || id) + (st.subcategory ? " · " + st.subcategory : "") +
+      " · " + mapped.length + "/" + st.curves.length + " 条" + (skipped ? "（跳过 " + skipped + "）" : ""));
+    setTimeout(() => { if (PB && PB.name === "expr:" + id) PB = null; }, cap * 1000 + 120);
   }
 
   // 表情试播：自己读 exp3 再写参数。
@@ -1330,6 +1389,57 @@
     txt.appendChild(el("div", "head", d.headline || ""));
     sum.appendChild(txt);
     diagEl.appendChild(sum);
+
+    // ---------- 表情能力 ----------
+    // 换模型的用户进来第一句问的就是「我这个模型能演多少」，所以放在问题列表之前。
+    // 分数是加权算的（眼睑/嘴型/歪头权重最高），不是简单数参数个数 ——
+    // 只有眼睑和嘴的模型照样能演害羞生气，报个 40% 只会吓到人。
+    const st = d.stats || {};
+    if (typeof st.exprScore === "number" && st.exprTotal) {
+      const box = el("div", "exprbar");
+      box.style.cssText = "margin:8px 0 10px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.04)";
+      const head = el("div");
+      head.style.cssText = "display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:6px";
+      const t = el("span", "", "表情能力");
+      t.style.opacity = ".75";
+      const v = el("span", "", st.exprScore + "%");
+      v.style.cssText = "font-weight:700;color:" +
+        (st.exprScore >= 85 ? "#7ee0a8" : st.exprScore >= 60 ? "#f0c95a" : "#f08a8a");
+      const det = el("span", "", "直连 " + st.exprDirect + " · 降级 " + st.exprDegraded + " · 缺 " + (st.exprMissing || []).length);
+      det.style.cssText = "margin-left:auto;opacity:.55;font-size:11px";
+      head.appendChild(t); head.appendChild(v);
+      // 试演：挑「害羞」——眯眼 + 笑 + 低头 + 视线躲，几乎把所有表情参数都用上了，
+      // 一段就能看出这台模型的表演骨架齐不齐。
+      const demo = el("button", "mini", "试演");
+      demo.style.cssText = "margin-left:2px;font-size:11px;padding:1px 7px;line-height:1.6";
+      demo.title = "在这个模型上播一段「害羞」，看看表情参数接得对不对";
+      demo.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const d2 = window.FishExprCurves;
+        if (!d2) { toast("表演库没加载（expr-curves.js）", "bad"); return; }
+        const by = (d2.byLabel && (d2.byLabel["害羞"] || d2.byLabel.happy)) || [];
+        playExprStyleById(by.length ? by[0] : "54");
+      });
+      head.appendChild(demo);
+      head.appendChild(det);
+      box.appendChild(head);
+
+      const track = el("div");
+      track.style.cssText = "height:5px;border-radius:3px;background:rgba(255,255,255,.1);overflow:hidden";
+      const fill = el("div");
+      fill.style.cssText = "height:100%;width:" + st.exprScore + "%;border-radius:3px;background:linear-gradient(90deg,#5ac8fa,#7ee0a8)";
+      track.appendChild(fill);
+      box.appendChild(track);
+
+      const miss = st.exprMissing || [];
+      if (miss.length) {
+        const ml = el("div", "", "缺：" + miss.slice(0, 6).map((x) => x.label).join("、") + (miss.length > 6 ? " 等" : ""));
+        ml.style.cssText = "margin-top:5px;font-size:11px;opacity:.5;line-height:1.5";
+        box.appendChild(ml);
+      }
+      diagEl.appendChild(box);
+    }
+
     for (const it of (d.issues || []).slice(0, 14)) {
       const row = el("div", "issue " + (it.level || "info"));
       row.appendChild(el("div", "lv", it.level === "error" ? "✕" : it.level === "warn" ? "!" : "·"));

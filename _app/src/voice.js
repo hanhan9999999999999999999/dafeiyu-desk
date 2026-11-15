@@ -198,8 +198,13 @@
     const r = await fetch(BASE + "/api/health", { cache: "no-store", signal: AbortSignal.timeout(8000) });
     const j = await r.json();
     const u = j && j.addresses && j.addresses[0] && j.addresses[0].urlFull;
-    if (!u) throw new Error("拿不到 bridge 地址");
-    token = new URL(u).searchParams.get("t");
+    if (u) token = new URL(u).searchParams.get("t");
+    if (!token && j && j.token) token = String(j.token);
+    // 老版 phone-bridge 的 health 故意不回令牌（怕把钥匙挂在门外），
+    // 令牌存在本机的 state.json 里，让主进程读出来给这里用。
+    if (!token && window.deskfish && window.deskfish.bridgeToken) {
+      try { token = await window.deskfish.bridgeToken(); } catch (e) { }
+    }
     if (!token) throw new Error("拿不到 token");
     return token;
   }
@@ -1269,12 +1274,20 @@
     const note = (e) => { if (!lastSpeakError) lastSpeakError = voiceErrText(e); };
     // 飞鱼：走服务端的流式接口，第一块 2-3 秒就出声，不用等整段算完。
     // 它自己会处理切句，所以不再叠前端的 speakStreaming（那样会多绕几圈 HTTP）。
-    if (voiceOut === "feiyu" && t.length >= 6) {
+    //
+    // 以前这里有个 t.length >= 6 的门槛：短句（「试听」这种）根本不会走飞鱼，
+    // 而是静默落到下面的 TTS —— 主人选了飞鱼却在听 Edge 的声音，还以为切成功了。
+    // 选哪一档就走哪一档，一句两个字也得是他选的那个声音。
+    if (voiceOut === "feiyu") {
       try {
         return await speakFeiyuStream(t);
       } catch (e) {
         note(e);
         log("飞鱼流式失败（" + (e && e.message ? e.message : e) + "），回落整段合成");
+        // 回落可以，但必须说出来。静默换成别的声音，等于让他以为飞鱼通了。
+        try {
+          if (window.FishSay) window.FishSay("飞鱼的接口没连上，这句先用默认声音念的", "calm", 4600);
+        } catch (_) { }
       }
     }
     // 长回复走分段流式；短句没必要折腾

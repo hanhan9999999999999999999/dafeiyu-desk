@@ -177,7 +177,10 @@ function sha256File(file) {
   const installer = path.join(path.dirname(DIST), "大肥鱼-" + v + "-安装包.exe");
   const notes = path.resolve(ROOT, "..", "docs", "RELEASE-" + v + ".md");
   if (!fs.existsSync(installer)) {
-    check("发布说明与安装包一致（v" + v + "）", false, "找不到 " + path.basename(installer));
+    // 还没打包的版本（比如刚改完版本号、还没跑 build）既没有安装包也没有发布说明，
+    // 这两样缺得一致，不算不一致。只有「有安装包没说明」或「有说明没包」才是问题。
+    check("发布说明与安装包一致（v" + v + "）", !fs.existsSync(notes),
+      fs.existsSync(notes) ? "有 docs/RELEASE-" + v + ".md 但找不到 " + path.basename(installer) : "");
   } else if (!fs.existsSync(notes)) {
     check("发布说明与安装包一致（v" + v + "）", false, "缺少 docs/RELEASE-" + v + ".md");
   } else {

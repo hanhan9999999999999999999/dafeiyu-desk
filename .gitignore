@@ -90,5 +90,13 @@ _publish/dafeiyu-desk/
 nul
 **/*.rescued2
 
-# 原始设计稿单个 125.6 MB，超过 GitHub 100 MB 上限
+# ---- 调试残留：截图与临时探针不进版本库 ----
+_app/_shots/
+_app/_shots-keys/
+_app/model/_*.cjs
+_shots/
+
+# ---- 美术源文件：PSD 单张就 125MB，超 GitHub 单文件 100MB 上限，不进版本库 ----
+# 需要 PSD 请到发布页或网盘取；仓库里只留模型配置与运行时资源。
 DeepSeek Live2D Model/psd/
+**/*.psd

@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld("deskfish", {
   onFeiyuSetup: (fn) => ipcRenderer.on("feiyu-setup", (_e, line) => fn(line)),
   testApi: (cfg) => ipcRenderer.invoke("api:test", cfg),
   chatApi: (req) => ipcRenderer.invoke("api:chat", req),
+  // 桥接令牌：老版 phone-bridge 的 /api/health 不回令牌，主进程从 state.json 里读
+  bridgeToken: () => ipcRenderer.invoke("bridge:token"),
   setFocusable: (v) => ipcRenderer.send("win:focusable", !!v),
 
   // 全局鼠标坐标（主进程采集）

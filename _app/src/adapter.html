@@ -458,6 +458,10 @@
        没有它就只能干看参数名，等于让用户闭着眼调。38KB，本地同源，不值得走接口。 -->
   <script src="motions.js"></script>
   <script src="motions-extra.js"></script>
+  <!-- 表演曲线库：适配器里要能「在这只模型上试演这个表情」。
+       曲线键是槽位 id（angleX / eyeSmile），播放前按当前绑定翻译成真实参数名，
+       所以换模型之后同一个按钮照样能播 —— 缺的槽位自动跳过。 -->
+  <script src="expr-curves.js"></script>
   <script src="motion3.js"></script>
   <script src="adapter.js"></script>
 </body>

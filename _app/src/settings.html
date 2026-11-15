@@ -449,6 +449,25 @@
           </div>
 
           <div class="row">
+            <div class="label">贴图精度<small>决定衣服上的蕾丝褶边清不清楚。越高越吃显存，自动=跟显卡能力走</small></div>
+            <div class="seg" id="texSeg">
+              <button data-v="0">自动</button>
+              <button data-v="1024">1024</button>
+              <button data-v="2048">2048</button>
+              <button data-v="3072">3072</button>
+              <button data-v="4096">4096</button>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="label">表情开关贴片<small>害羞时脸红、爱心眼、&gt;&lt; 笑眼、黑脸这些「整张贴图」的重音。关掉只留眼睑嘴角的细微表情</small></div>
+            <div class="seg" id="patchSeg">
+              <button data-v="1">开</button>
+              <button data-v="0">关</button>
+            </div>
+          </div>
+
+          <div class="row">
             <div class="label">帧率<small>她动起来的流畅度。60 最顺，30 省一半 CPU，15 最省电</small></div>
             <div class="seg" id="fpsSeg">
               <button data-v="60">60</button>
@@ -519,6 +538,7 @@
                 <button data-v="feiyu" type="button">飞鱼</button>
               </div>
             </div>
+            <p class="hint" id="voiceOutFeiyuHint" style="display:none">飞鱼的声线（参考音频、语速、引擎状态）在旁边的「<b>变声引擎</b>」页里选，选完这里就生效，不用再点别的。</p>
 
             <div class="row">
               <div class="label">音量<small>0–100，只影响她的语音和语气词，不动系统音量</small></div>
@@ -618,6 +638,11 @@
                   <span class="mini-note">状态</span>
                   <span class="hint" id="feiyuEnvState" style="flex:1;min-width:0">正在检查…</span>
                   <button class="mini" id="feiyuInstall" type="button">一键安装</button>
+                </div>
+                <div class="voiceline">
+                  <span class="mini-note">引擎</span>
+                  <span class="hint" id="feiyuEngineState" style="flex:1;min-width:0">正在检测引擎…</span>
+                  <button class="mini" id="feiyuEngineCheck" type="button" title="重新检测一次引擎是否在跑">重测</button>
                 </div>
                 <div class="hint">飞鱼是基于 CosyVoice3 的中文角色声线（cute / gentle 两种风格），原声来自 B 站 UP 主「星落落_oi」，已获授权用于声库训练。它不卷舌、语气自然，是这里音质最好的一个。<b>整套约 14 GB</b>（声库 7.1G + 运行环境 5.6G + 中文 Hubert 1.2G），所以不随安装包发——点「一键安装」，它会自己从国内镜像下完并配好，中途可以关窗口，下次接着装。</div>
                 <div class="hint" id="feiyuState">未启用</div>

@@ -70,17 +70,36 @@ function findDsh() {
   if (envBin) candidates.push({ bin: envBin, node: envNode });
 
   const dshHome = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
-  // 官方安装器把运行时放在这里的概率最高
-  const nodeGuesses = [
-    path.join(dshHome, 'dsh-runtimes', 'dsh-primary-runtime', 'dependencies', 'node', 'bin', 'node.exe'),
-    path.join(dshHome, 'dsh-runtimes', 'dsh-primary-runtime', 'dependencies', 'node', 'node.exe'),
-  ];
-  // DSH 本体可能在几处：独立安装、桌面版 resources 下
-  const binGuesses = [
-    'D:\\deepseekharness\\resources\\app\\dsh\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
-    path.join(dshHome, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
-    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'deepseekharness', 'resources', 'app', 'dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
-  ];
+  // node.exe：dsh-runtimes 下面的运行时目录会被 DSH 改名
+  // （原来是 dsh-primary-runtime，现在叫 dsh-next-primary-runtime），
+  // 写死一个名字就会「明明装着却找不到」。这里把目录全列一遍再拼路径。
+  const nodeGuesses = [];
+  const rtRoot = path.join(dshHome, 'dsh-runtimes');
+  try {
+    for (const d of fs.readdirSync(rtRoot)) {
+      nodeGuesses.push(path.join(rtRoot, d, 'dependencies', 'node', 'bin', 'node.exe'));
+      nodeGuesses.push(path.join(rtRoot, d, 'dependencies', 'node', 'node.exe'));
+    }
+  } catch (e) { }
+  nodeGuesses.push(path.join(dshHome, 'dsh-runtimes', 'dsh-primary-runtime', 'dependencies', 'node', 'bin', 'node.exe'));
+
+  // bin.js：DSH 本体。桌面版装在 <安装目录>\resources\app\node_modules\@deepseek-ai\dsh\lib\bin.js，
+  // 安装目录同样可能搬家（这台机器从 D:\deepseekharness 搬到了 D:\DSH\DSH NEXT）。
+  const installDirs = [
+    process.env.DSH_INSTALL_DIR,
+    'D:\\DSH\\DSH NEXT',
+    'D:\\deepseekharness',
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'DSH NEXT'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'deepseekharness'),
+    path.join(process.env.ProgramFiles || '', 'DSH NEXT'),
+    path.join(process.env.ProgramFiles || '', 'deepseekharness'),
+  ].filter(Boolean);
+  const binGuesses = [];
+  for (const dir of installDirs) {
+    binGuesses.push(path.join(dir, 'resources', 'app', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'));
+    binGuesses.push(path.join(dir, 'resources', 'app', 'dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'));
+  }
+  binGuesses.push(path.join(dshHome, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'));
 
   for (const node of nodeGuesses) {
     for (const bin of binGuesses) candidates.push({ bin, node });

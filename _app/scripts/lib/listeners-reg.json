@@ -131,19 +131,19 @@
   },
   "except": [
     {
-      "where": "src/adapter.js:450",
+      "where": "src/adapter.js:456",
       "why": "挂在**新加载的 model** 的 internalModel 上；旧 model 在 437-439 行 destroy，解绑随之发生。每切一次模型都是一对新对象。"
     },
     {
-      "where": "src/adapter.js:451",
+      "where": "src/adapter.js:457",
       "why": "同上，第二条回调（表达式预览）。两条分开是因为它们各自可以被单独关掉。"
     },
     {
-      "where": "src/server.js:530",
+      "where": "src/server.js:550",
       "why": "每次 listen() 都新建一个 server 对象，once(\"error\") 挂在那个新对象上。"
     },
     {
-      "where": "src/server.js:531",
+      "where": "src/server.js:551",
       "why": "同上，once(\"listening\") 也是一次性。"
     }
   ]

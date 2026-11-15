@@ -317,13 +317,57 @@ function miniFixBridgeUrl() {
   } catch (e) { }
 }
 
-// 探一下外部桥接（phone-bridge）在不在。只用来看日志和状态，不擅自拉起别的进程。
+// phone-bridge 的 /api/health 故意不回令牌（注释写得明白：不能把钥匙挂在门外），
+// 但同一台机器上它的 state.json 里存着。读它兜底，省得用户自己翻目录。
+// 顺序照「最像的放前面」：先认本机这个装法，再认常见的家目录/文档目录。
+let __bridgeToken = "";
+
+function bridgeStatePaths() {
+  const list = [];
+  const push = (p) => { if (p && list.indexOf(p) < 0) list.push(p); };
+  // 实际装在 <项目目录>/runtime/state.json；老版本直接放在下一层，两个都认
+  const roots = ["D:\\document\\Remote Connect DSH\\phone-bridge"];
+  try { roots.push(path.join(app.getPath("home"), "Remote Connect DSH", "phone-bridge")); } catch (e) { }
+  try { roots.push(path.join(app.getPath("documents"), "Remote Connect DSH", "phone-bridge")); } catch (e) { }
+  for (const r of roots) {
+    push(path.join(r, "runtime", "state.json"));
+    push(path.join(r, "state.json"));
+  }
+  return list;
+}
+
+function readBridgeToken() {
+  if (__bridgeToken) return __bridgeToken;
+  for (const p of bridgeStatePaths()) {
+    try {
+      if (!fs.existsSync(p)) continue;
+      const j = JSON.parse(fs.readFileSync(p, "utf8"));
+      const tk = String((j && j.token) || "").trim();
+      // 太短的多半不是令牌，别拿去当令牌用
+      if (tk.length >= 16) {
+        __bridgeToken = tk;
+        log("[main] 从 " + p + " 读到桥接令牌（" + tk.length + " 位）");
+        return tk;
+      }
+    } catch (e) { }
+  }
+  return "";
+}
+
+// 探一下外部桥接在不在、能不能给凭证。
+// 只看连通性不够：老版 phone-bridge 的 /api/health 也回 200，但没有 token 字段，
+// 语音那边就永远报「桥接没给出凭证，地址可能填错了」。这种算不可用，改用自带的。
 async function probeBridge() {
   try {
     const r = await fetch(bridgeBase() + "/api/health", { cache: "no-store" });
     if (!r.ok) return false;
     const j = await r.json();
-    return !!(j && j.ok);
+    if (!j || !j.ok) return false;
+    if (j.token) return true;
+    const list = Array.isArray(j.addresses) ? j.addresses : [];
+    if (list.some((a) => a && /[?&]t=/.test(String(a.urlFull || a.url || "")))) return true;
+    // 老版 phone-bridge 的 health 两个都不给，但本机 state.json 里有令牌
+    return !!readBridgeToken();
   } catch (e) {
     return false;
   }
@@ -2381,6 +2425,74 @@ async function seeViaBridge(prompt, dataUrl) {
   }
 }
 
+// 走主人自己的 phone-bridge（8899）。它没有 /api/vision，但支持「上传附件 + 发一句话」，
+// 这条路在 DSH NEXT 上是通的 —— 自带那个 runner（stdio JSON-RPC）已经走不通了。
+// 三步：传图 → 发一句让她看 → 轮询 /api/state 等她的回话。
+async function seeViaPhoneBridge(prompt, dataUrl) {
+  const cfg = S.get() || {};
+  const base = String(cfg.bridgeUrl || "http://127.0.0.1:8899").trim().replace(/\/+$/, "");
+  const tk = readBridgeToken();
+  if (!tk) throw new Error("桥接还没给出凭证");
+  const q = "?t=" + encodeURIComponent(tk);
+
+  const b64 = String(dataUrl).replace(/^data:image\/[a-z+]+;base64,/i, "");
+  const buf = Buffer.from(b64, "base64");
+  if (!buf.length) throw new Error("这一帧没抓到内容");
+  const name = "screen-" + Date.now() + ".jpg";
+
+  const up = await net.fetch(base + "/api/upload" + q, {
+    method: "POST",
+    headers: { "content-type": "image/jpeg", "x-file-name": encodeURIComponent(name) },
+    body: buf,
+  });
+  const uj = await up.json().catch(() => null);
+  if (!up.ok || !uj || !uj.ok || !uj.path) {
+    throw new Error((uj && uj.error) || ("上传失败 " + up.status));
+  }
+
+  // 记住发之前最后一条 assistant 的时间，只认之后的新回复
+  let before = 0;
+  try {
+    const r0 = await net.fetch(base + "/api/state" + q, { cache: "no-store" });
+    const j0 = await r0.json().catch(() => null);
+    const m0 = j0 && Array.isArray(j0.messages) ? j0.messages : [];
+    for (const m of m0) {
+      if (m && m.role === "assistant" && Number(m.at) > before) before = Number(m.at);
+    }
+  } catch (e) { /* 读不到就当 0，下面按全文重找 */ }
+
+  const sd = await net.fetch(base + "/api/send" + q, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      text: prompt,
+      files: [{ path: uj.path, name: uj.name || name, size: Number(uj.size) || buf.length, mime: "image/jpeg" }],
+    }),
+  });
+  if (!sd.ok) throw new Error("发送失败 " + sd.status);
+
+  const t0 = Date.now();
+  const LIMIT = 75000;
+  while (Date.now() - t0 < LIMIT) {
+    await new Promise((r) => setTimeout(r, 1200));
+    let sj = null;
+    try {
+      const st = await net.fetch(base + "/api/state" + q, { cache: "no-store" });
+      sj = await st.json().catch(() => null);
+    } catch (e) { continue; }
+    const ms = sj && Array.isArray(sj.messages) ? sj.messages : [];
+    for (let i = ms.length - 1; i >= 0; i--) {
+      const m = ms[i];
+      if (!m || m.role !== "assistant") continue;
+      const txt = String(m.text || "").trim();
+      if (!txt) continue;
+      if (Number(m.at) > before) return txt;
+      break; // 最后一条 assistant 还是旧的，说明这轮还没回
+    }
+  }
+  throw new Error("等了 75 秒她还没回话");
+}
+
 async function seeAnalyze(dataUrl, diff) {
   const c = seeConfig();
   const s = S.get();
@@ -2395,25 +2507,34 @@ async function seeAnalyze(dataUrl, diff) {
   // 如果主人在设置里明确填了「看屏幕接口地址」，就尊重他的配置优先走 HTTP。
   const preferHttp = !!String(s.seeBase || "").trim();
   if (!preferHttp) {
+    let lastErr = null;
+    // 1) 先走主人自己的 phone-bridge（8899）：支持带图发消息，这台机器上真正可用的一条
+    try {
+      let text = await seeViaPhoneBridge(prompt, dataUrl);
+      text = text.replace(/^["“「」『]+|["”」』]+$/g, "").replace(/\s+/g, " ").trim();
+      if (text) {
+        if (text.length > 180) text = text.slice(0, 178) + "…";
+        return { text, model: "DSH 桥接", diff };
+      }
+    } catch (e) { lastErr = e; }
+    // 2) 再试自带的 /api/vision（开发态才有）
     try {
       let text = await seeViaBridge(prompt, dataUrl);
-      text = text.replace(/^["“」『]+|["”」』]+$/g, "").replace(/\s+/g, " ").trim();
+      text = text.replace(/^["“「」『]+|["”」』]+$/g, "").replace(/\s+/g, " ").trim();
       if (text) {
         if (text.length > 180) text = text.slice(0, 178) + "…";
         return { text, model: "DSH 本地", diff };
       }
-      throw new Error("本地视觉接口没有给出内容");
-    } catch (e) {
-      if (!c.base || !c.model) {
-        const raw = String((e && e.message) || e);
-        // 把一个英文字段名译成人话；接口没配的时候用户不该看见 not found / 404 这种原文
-        const friendly = /not found|404|ECONNREFUSED|ERR_CONNECTION/i.test(raw)
-          ? "本地视觉通道连不上（发行版不自带）"
-          : raw;
-        throw new Error("这一眼没看成：" + friendly);
-      }
-      // 配置了外部接口就继续往下试
+    } catch (e) { if (!lastErr) lastErr = e; }
+    if (!c.base || !c.model) {
+      const raw = String((lastErr && lastErr.message) || lastErr || "");
+      // 把一个英文字段名译成人话；接口没配的时候用户不该看见 not found / 404 这种原文
+      const friendly = /not found|404|ECONNREFUSED|ERR_CONNECTION/i.test(raw)
+        ? "本地视觉通道连不上（发行版不自带）"
+        : raw;
+      throw new Error("这一眼没看成：" + friendly);
     }
+    // 配置了外部接口就继续往下试
   }
 
   if (!c.base) throw new Error("还没配置视觉模型：设置 → 看屏幕，填接口地址");
@@ -2840,7 +2961,10 @@ function resetPosition() {
 // ---------- DSH 活跃度 ----------
 // DSH 的 /api/pet/state 要会话 cookie，独立进程拿不到；
 // 但每个会话都在往 session.v4.jsonl.zstd 追加内容，看最近写入时间就够了。
-const SESSIONS_ROOT = path.join(process.env.USERPROFILE || "C:\\Users\\Administrator", ".dsh", "sessions");
+// 会话目录：DSH_HOME 指向哪儿就看哪儿。写死 USERPROFILE\.dsh 会指到一个
+// 不存在的目录（DSH 搬到 D 盘了），于是「DSH 在不在干活」永远读成空闲 ——
+// 界面上看着连上了，其实什么都没读到。
+const SESSIONS_ROOT = process.env.DSH_HOME ? path.join(process.env.DSH_HOME, "sessions") : path.join(process.env.USERPROFILE || "C:\\Users\\Administrator", ".dsh", "sessions");
 const SESSION_FILE = "session.v4.jsonl.zstd";
 
 function newestSessionWrite() {
@@ -2941,6 +3065,11 @@ ipcMain.handle("bridge:test", async (_e, url) => {
       error: /abort/i.test(msg) ? "超时（6 秒没响应，可能不在同一网络）" : msg,
     };
   }
+});
+
+// 渲染进程要令牌时来问：老版 phone-bridge 的 health 不给，只能从 state.json 读
+ipcMain.handle("bridge:token", () => {
+  try { return readBridgeToken(); } catch (e) { return ""; }
 });
 
 ipcMain.handle("api:chat", async (_e, req0) => {
@@ -3281,6 +3410,8 @@ ipcMain.handle("settings:reset", async () => {
 //   密钥类（apiKey）—— 不该落进一个随手能发出去的文件里
 const EXPORTABLE = [
   "bridgeUrl", "voiceId", "micDevice", "scale", "opacity", "resolution",
+  "texMax",
+  "exprPatch",
   "sharpen", "fpsCap", "alwaysOnTop", "clickThrough", "followCursor", "autoIdle",
   "blinkEnabled", "dockAutoHide", "launchAtLogin",
   // 取景和快捷键是最「个人」的两项：换台机器重新调一遍很烦，必须跟着配置走。
@@ -4656,14 +4787,19 @@ app.whenReady().then(async () => {
     setTimeout(() => { rvcStart().catch((e) => log("[main] RVC 自动启动失败: " + e)); }, 2500);
   }
 
-  // 只用外部那一个桥（phone-bridge，默认 8899），不再自动拉起自带的迷你桥接。
-  // 迷你桥接要求磁盘上有独立的 DSH bin.js，而这台机器是打包版（DSH 在 app.asar 里），
-  // 它必然找不到 → 每次开机都报一句「没找到 DSH」，白起一个进程还占着 8898。
+  // 先探外部那个桥（phone-bridge，默认 8899）。它要是不在、或者版本太老
+  // （老版 /api/health 不给 token，语音就一直报「桥接没给出凭证」），
+  // 就把自带的迷你桥接拉起来顶上 —— 它以前在打包版上找不到 DSH 的 bin.js，
+  // 现在 findDsh 会扫 dsh-runtimes 下的运行时刻目录和几个常见安装位置，能找到了。
   miniFixBridgeUrl();
   if ((S.get().replyMode || "dsh") === "dsh") {
     setTimeout(() => {
       probeBridge()
-        .then((ok) => log(ok ? "[main] 外部桥接已就绪：" + bridgeBase() : "[main] 外部桥接未响应，检查 phone-bridge 是否在跑"))
+        .then((ok) => {
+          if (ok) { log("[main] 外部桥接已就绪：" + bridgeBase()); return null; }
+          log("[main] 外部桥接未响应，改起自带迷你桥接（" + MINI_PORT + "）");
+          return miniStart();
+        })
         .catch((e) => log("[main] 桥接探测失败: " + e));
     }, 3000);
   }

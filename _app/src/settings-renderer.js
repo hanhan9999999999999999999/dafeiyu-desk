@@ -12,6 +12,8 @@ const els = {
   volumeNum: document.getElementById("volumeNum"),
   volumeApply: document.getElementById("volumeApply"),
   resSeg: document.getElementById("resSeg"),
+  texSeg: document.getElementById("texSeg"),
+  patchSeg: document.getElementById("patchSeg"),
   fpsSeg: document.getElementById("fpsSeg"),
   sharpen: document.getElementById("sharpen"),
   viewState: document.getElementById("viewState"),
@@ -93,6 +95,10 @@ const els = {
   feiyuRefInfo: document.getElementById("feiyuRefInfo"),
   feiyuState: document.getElementById("feiyuState"),
   feiyuEnvState: document.getElementById("feiyuEnvState"),
+  voiceOutFeiyuHint: document.getElementById("voiceOutFeiyuHint"),
+  feiyuEngineState: document.getElementById("feiyuEngineState"),
+  feiyuEngineCheck: document.getElementById("feiyuEngineCheck"),
+  feiyuEngineCheck: document.getElementById("feiyuEngineCheck"),
   feiyuInstall: document.getElementById("feiyuInstall"),
   rvcBox: document.getElementById("rvcBox"),
   rvcPython: document.getElementById("rvcPython"),
@@ -523,6 +529,12 @@ function paint(s) {
   if (els.rvcBox) els.rvcBox.classList.toggle("hidden", (s.voiceOut || "tts") !== "rvc");
   if (els.xttsBox) els.xttsBox.classList.toggle("hidden", (s.voiceOut || "tts") !== "xtts");
   if (els.feiyuBox) els.feiyuBox.classList.toggle("hidden", (s.voiceOut || "tts") !== "feiyu");
+  // 面板一打开就把引擎状态拉一次（startFeiyuPoll 是幂等的，重复调只起一个定时器）。
+  try { startFeiyuPoll(); } catch (e) { }
+  // 选飞鱼但人在「听与说」页时，告诉他声线在隔壁页 —— 主人问过「飞鱼的模型选择怎么丢了」。
+  if (els.voiceOutFeiyuHint) {
+    els.voiceOutFeiyuHint.style.display = (s.voiceOut || "tts") === "feiyu" ? "" : "none";
+  }
   if (els.timbreSeg) {
     for (const b of els.timbreSeg.children) {
       b.classList.toggle("on", b.dataset.v === (s.voiceOut || "tts"));
@@ -572,6 +584,20 @@ function paint(s) {
 
   for (const b of els.resSeg.children) {
     b.classList.toggle("on", Number(b.dataset.v) === s.resolution);
+  }
+  // 贴图精度：0=自动。老设置里没这一项时按 0 显示，跟实际行为一致。
+  if (els.texSeg) {
+    const want = Number(s.texMax) >= 0 ? Number(s.texMax) : 0;
+    for (const b of els.texSeg.children) {
+      b.classList.toggle("on", Number(b.dataset.v) === want);
+    }
+  }
+  // 表情开关贴片：1=开（默认），0=关
+  if (els.patchSeg) {
+    const on = s.exprPatch === false ? 0 : 1;
+    for (const b of els.patchSeg.children) {
+      b.classList.toggle("on", Number(b.dataset.v) === on);
+    }
   }
   for (const key of ["sharpen", "alwaysOnTop", "clickThrough", "followCursor", "autoIdle", "blinkEnabled", "launchAtLogin", "dockAutoHide"]) {
     // 判空：少一个元素只跳过它，不能让 paint() 抛出去——
@@ -1178,6 +1204,52 @@ if (els.xttsTry) {
 // 原来这里有一对「可爱/温柔」按钮。2026-11-08 主人说这两个选项没必要——
 // 参考音频本身就是音色，用户塞哪个就用哪个，所以按钮组删了，改成上面那个下拉 + 文件夹。
 
+// 引擎活没活。主人问过「怎么选了飞鱼还是 TTS 的声音」，根子就在这儿：
+// 环境装好 ≠ 引擎在跑。三个层次分开说，别让人猜。
+//   available=false  → 目录/venv/声库缺东西，先点「一键安装」
+//   available=true 且 ready=false → 装好了但引擎进程没起来，切到飞鱼说一句就会拉起来
+//   ready=true       → 引擎在跑，模型也在显存里
+async function checkFeiyuEngine() {
+  const el = els.feiyuEngineState;
+  if (!el) return;
+  try {
+    const r = await fetch("/engine/feiyu_status", { cache: "no-store" });
+    const j = await r.json();
+    if (!j || j.ok === false || j.available === false) {
+      el.className = "hint bad";
+      el.textContent = "✗ 没装好，装完才有引擎" + (j && j.error ? "（" + String(j.error).slice(0, 60) + "）" : "");
+      return;
+    }
+    if (!j.ready) {
+      el.className = "hint";
+      el.textContent = "装好了，但引擎没启动 · 切到飞鱼说一句会自动拉起来（第一句约 20 秒）";
+      return;
+    }
+    el.className = "hint ok";
+    el.textContent = "● 引擎已启动" + (j.device ? " · " + j.device : "") + (j.style ? " · " + j.style : "");
+  } catch (e) {
+    el.className = "hint bad";
+    el.textContent = "✗ 查不到引擎状态（本地服务没起来？）";
+  }
+}
+if (els.feiyuEngineCheck) {
+  els.feiyuEngineCheck.addEventListener("click", () => checkFeiyuEngine());
+}
+// 只在「变声引擎」这页看得见时才轮询，别让一个后台面板每 3 秒发一次请求。
+let feiyuPollTimer = 0;
+function startFeiyuPoll() {
+  if (feiyuPollTimer) return;
+  checkFeiyuEngine();
+  feiyuPollTimer = setInterval(() => {
+    if (document.hidden) return;
+    // 子页切换在 settings-shell.js:177-186：它给 .subpage[data-sub] 挂 .on，
+    // 从来没有写过 body.dataset.sub，所以判据要看那个 class。
+    const page = document.querySelector('.subpage[data-sub="timbre"]');
+    if (!page || !page.classList.contains("on")) return;
+    checkFeiyuEngine();
+  }, 3000);
+}
+
 if (els.feiyuTry) {
   els.feiyuTry.addEventListener("click", async () => {
     if (els.feiyuState) {
@@ -1418,6 +1490,26 @@ els.resSeg.addEventListener("click", (e) => {
   push({ resolution: Number(b.dataset.v) });
 });
 
+// ---- 贴图精度分段 ----
+// 0=自动（按显卡能力取 4096）。桌宠那边收到设置后立刻重画贴图，不用重启。
+if (els.texSeg) {
+  els.texSeg.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    push({ texMax: Number(b.dataset.v) });
+  });
+}
+
+// ---- 表情开关贴片（脸红 / 爱心眼 / >< 笑眼 / 黑脸 / 张嘴 / 屑屑眼）----
+// 关掉之后她只靠眼睑、眉、嘴角这些连续参数演，不再切整张贴图。
+if (els.patchSeg) {
+  els.patchSeg.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    push({ exprPatch: Number(b.dataset.v) === 1 });
+  });
+}
+
 // ---- 帧率上限 ----
 els.fpsSeg.addEventListener("click", (e) => {
   const b = e.target.closest("button");
@@ -1607,6 +1699,18 @@ function paintMini(s) {
       '<span class="ok">● 自带桥接运行中</span>' +
       '<span class="meta"> · ' + esc(s.url) + '</span>';
     if (els.miniToggle) els.miniToggle.textContent = "停止";
+    // 桥接已经跑着、地址栏却还写着别的端口时替用户改过来。
+    // 踩过：上次会话里起的桥接这次还在跑，这里只显示「运行中」不回填，
+    // 地址栏留着 8899（外部 phone-bridge 的端口），语音就一直报拿不到凭证。
+    // 只在当前值是空的、或者就是本机 8899 默认值时才改 —— 用户手填的局域网地址不动。
+    const want = String(s.url || "").trim();
+    const cur = els.bridgeUrl ? String(els.bridgeUrl.value || "").trim() : "";
+    const isLocalDefault = !cur || /^https?:\/\/(127\.0\.0\.1|localhost):8899\/?$/.test(cur);
+    if (want && isLocalDefault && cur !== want) {
+      els.bridgeUrl.value = want;
+      push({ bridgeUrl: want });
+      if (window.FishVoice && window.FishVoice.setBridgeUrl) window.FishVoice.setBridgeUrl(want);
+    }
   } else {
     els.miniResult.innerHTML = s.error
       ? '<span class="bad">● 未运行</span><span class="meta"> · ' + esc(s.error) + '</span>'

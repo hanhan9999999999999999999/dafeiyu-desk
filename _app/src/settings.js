@@ -42,6 +42,13 @@ const DEFAULTS = {
   // 当前用哪个模型包（src/packs 的包 id）。空 = 用第一个内置包。
   activePack: "",
   resolution: 2, // 1 | 2 | 3 超采样倍数
+  // 贴图精度：0=自动（按显卡能力，通常给到长边 4096），其余值就是贴图长边的像素上限。
+  // 这一项决定衣服上的蕾丝、褶边清不清楚：贴图从 8192 缩到 2048 时，衣服细节会糊成一片。
+  // 调大更清楚、更吃显存；调小省显存、会变糊。改完立刻生效，不用重启。
+  texMax: 0, // 0 | 1024 | 2048 | 3072 | 4096
+  // 表情开关贴片：脸红、爱心眼、>< 笑眼、黑脸、张嘴、屑屑眼这些「整张贴图切换」。
+  // 关掉之后她只靠眼睑/眉/嘴角的连续参数演，不会突然换一张脸。
+  exprPatch: true,
   fpsCap: 30, // 60 | 30 | 15 —— 她动起来的帧率上限；空闲时还会再降到 15
   // 说话的声音。空 = 用引擎自己的默认（晓萱）。
   voiceId: "",
@@ -143,7 +150,7 @@ const RANGES = {
 };
 
 const BOOLS = [
-  "rvcAutoStop", "alwaysOnTop", "clickThrough", "followCursor", "autoIdle", "blinkEnabled", "sharpen", "launchAtLogin", "dockAutoHide", "seeSpeak", "mute"];
+  "rvcAutoStop", "alwaysOnTop", "clickThrough", "followCursor", "autoIdle", "blinkEnabled", "sharpen", "launchAtLogin", "dockAutoHide", "seeSpeak", "mute", "exprPatch"];
 
 function clamp(v, lo, hi) {
   const n = Number(v);
@@ -207,6 +214,13 @@ function sanitize(raw) {
     out[key] = val;
   }
   out.resolution = Math.round(clamp(out.resolution, 1, 3) ?? DEFAULTS.resolution);
+  // 贴图精度：只认 0（自动）和 1024~4096 之间的整数。别的值一律当自动，
+  // 免得一个手填的 99999 把五张图按超大尺寸怼进显存。
+  {
+    const raw2 = Math.round(Number(out.texMax));
+    if (!Number.isFinite(raw2) || raw2 <= 0) out.texMax = 0;
+    else out.texMax = Math.min(4096, Math.max(1024, raw2));
+  }
   // 模型包 id 只允许小写字母数字下划线中划线：它会拼进文件路径和 URL，
   // 放开就等于允许 ../ 这种穿越。
   out.activePack = typeof out.activePack === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(out.activePack)

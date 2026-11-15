@@ -114,6 +114,26 @@ function startServer(opts) {
         return;
       }
 
+      // 飞鱼引擎活没活：设置页要如实告诉主人，而不是让他念一句才发现没声。
+      // 三个层次分开报，因为「装好了但没启动」和「压根没装」完全是两回事：
+      //   available=false → 目录/venv/声库缺东西，先点「一键安装」
+      //   available=true + ready=false → 装好了但引擎进程没起来（切到飞鱼说一句就会拉起来）
+      //   ready=true → 引擎在跑，模型也在显存里
+      if (url === "/engine/feiyu_status" && req.method === "GET") {
+        (async () => {
+          try {
+            const f = await engines.feiyu();
+            const st = (f && f.status) ? f.status() : {};
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+            res.end(JSON.stringify(Object.assign({ ok: true }, st)));
+          } catch (e) {
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+            res.end(JSON.stringify({ ok: false, available: false, ready: false, error: String(e && e.message || e) }));
+          }
+        })();
+        return;
+      }
+
       // 反向开关：用户把「启动时预热」关掉时立刻还内存。
       if (url === "/engine/unload" && req.method === "POST") {
         (async () => {

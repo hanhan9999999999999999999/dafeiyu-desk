@@ -70,6 +70,42 @@ function diagnose(p) {
   const boundParams = sem.PARAM_SLOTS.filter((s) => !!pc[s.id]).length;
   const missingRequired = sem.REQUIRED_PARAMS.filter((id) => !pc[id]);
 
+  // ---------- 表情能力 ----------
+  // 23 个表演槽按权重算「这个模型能吃下多少表演」。
+  // 为什么不按参数个数平均：只有眼睑 + 嘴型的模型照样能演害羞、生气、难过，
+  // 缺两根眉毛只是少一层细节，按个数算会把它报成 40%，用户以为自己模型废了。
+  // eyeSmile 例外：没有笑眼参数时可以拿眼睑开合近似（和渲染端 EXPR_DEGRADE 同一条规则），
+  // 所以算 60% 权重，不当作缺。
+  const perfSlots = sem.PERF_PARAM_SLOTS || [];
+  let perfW = 0;
+  let perfGot = 0;
+  const perfMissing = [];
+  const perfDegraded = [];
+  for (const s of perfSlots) {
+    const w = sem.weightOf(s.id);
+    perfW += w;
+    if (pc[s.id]) { perfGot += w; continue; }
+    if (s.id === "eyeSmile" && (pc.eyeLOpen || pc.eyeROpen)) {
+      perfGot += w * 0.6;
+      perfDegraded.push({ id: s.id, label: s.label });
+      continue;
+    }
+    perfMissing.push({ id: s.id, label: s.label, weight: w });
+  }
+  const exprScore = perfW > 0 ? Math.round((perfGot / perfW) * 100) : 0;
+  // 只报 info 不扣分：表情参数缺了不影响软件运行，只是某些表演会单薄一点。
+  if (perfSlots.length && exprScore < 85) {
+    const names = perfMissing.slice(0, 3).map((x) => x.label).join("、");
+    issues.push({
+      level: "info",
+      layer: "params",
+      code: "expr-coverage",
+      message: `表情能力 ${exprScore}%（满分 100）—— 缺 ${perfMissing.length} 个表情参数` +
+        (perfMissing.length ? `：${names}${perfMissing.length > 3 ? " 等" : ""}` : "") +
+        "；用到它们的表情会按本模型已有的参数近似，不会报错",
+    });
+  }
+
   const exprCount = (r.expressions || []).length;
   const g = (r.groups || {});
 
@@ -108,7 +144,7 @@ function diagnose(p) {
   } else if (warns.length) {
     headline = warns[0].message;
   } else {
-    headline = `参数 ${boundParams}/${sem.PARAM_SLOTS.length} 全部就位，动作与表情都已接上`;
+    headline = `参数 ${boundParams}/${sem.PARAM_SLOTS.length} 全部就位，表情能力 ${exprScore}%，动作与表情都已接上`;
   }
 
   return {
@@ -123,6 +159,12 @@ function diagnose(p) {
       paramsBound: boundParams,
       paramsTotal: sem.PARAM_SLOTS.length,
       paramsMissing: missingRequired.map((id) => ({ id, label: sem.PARAM_BY_ID[id].label })),
+      // 表演能力：适配器要拿这几个数字画「你这个模型能演多少」那条进度条
+      exprScore,
+      exprTotal: perfSlots.length,
+      exprDirect: perfSlots.length - perfMissing.length - perfDegraded.length,
+      exprDegraded: perfDegraded.length,
+      exprMissing: perfMissing.map((x) => ({ id: x.id, label: x.label, weight: x.weight })),
       textures: (r.textures || []).length,
       textureMissing: (r.textures || []).filter((t) => t.missing).length,
       motions: Object.keys(r.motions || {}).length,
