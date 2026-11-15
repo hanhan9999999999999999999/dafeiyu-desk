@@ -3412,19 +3412,52 @@ ipcMain.on("win:dragStart", () => {
   dragAnchor = { cx: p.x, cy: p.y, wx: x, wy: y };
 });
 
+// 拖动过程中只夹「所有屏幕的并集」：允许她跨屏、沿着屏边走，
+// 但不会掉进屏幕外面那块看不见的地方。
+// 这里不能用单屏 workArea 硬夹——一旦在某块屏的下边缘被夹住，
+// 窗口就不再跟着光标走，光标一离窗，pointermove 全断，
+// 表现是「卡在屏幕边上再也拖不回来」（第一次改的时候就是这么卡住的）。
+function clampToAllDisplays(x, y, w, h) {
+  const ds = screen.getAllDisplays();
+  if (!ds.length) return { x, y };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const d of ds) {
+    const a = d.bounds;
+    minX = Math.min(minX, a.x);
+    minY = Math.min(minY, a.y);
+    maxX = Math.max(maxX, a.x + a.width);
+    maxY = Math.max(maxY, a.y + a.height);
+  }
+  return {
+    x: Math.round(Math.min(Math.max(x, minX), Math.max(minX, maxX - w))),
+    y: Math.round(Math.min(Math.max(y, minY), Math.max(minY, maxY - h))),
+  };
+}
+
 ipcMain.on("win:dragMove", () => {
   if (!win || win.isDestroyed() || dragAnchor === null) return;
   const p = screen.getCursorScreenPoint();
-  const nx = Math.round(dragAnchor.wx + (p.x - dragAnchor.cx));
-  const ny = Math.round(dragAnchor.wy + (p.y - dragAnchor.cy));
-  win.setPosition(nx, ny);
+  const b = win.getBounds();
+  // 以前直接把光标位移原样加上去，于是能把窗口拖到屏幕外面——
+  // 底边一出去，下面那排按钮（发送/看屏幕/对话/档案）整条落在屏幕外，
+  // 看着有、点不着，用户只会说「按钮点不开东西」。
+  const nx = dragAnchor.wx + (p.x - dragAnchor.cx);
+  const ny = dragAnchor.wy + (p.y - dragAnchor.cy);
+  const c = clampToAllDisplays(nx, ny, b.width, b.height);
+  win.setPosition(c.x, c.y);
 });
 
 ipcMain.on("win:dragEnd", () => {
   dragAnchor = null;
   if (!win || win.isDestroyed()) return;
-  const [x, y] = win.getPosition();
-  S.patch({ x, y });
+  const b = win.getBounds();
+  // 松手之后才按「最近那块屏的 workArea」把整窗收进来：
+  // 停在屏幕外面 = 用户既看不见也摸不到，只能靠重启。
+  const c = ensureStartPos(b.x, b.y, b.width, b.height);
+  if (c.x !== b.x || c.y !== b.y) {
+    try { win.setPosition(c.x, c.y); } catch (e) { }
+  }
+  S.patch({ x: c.x, y: c.y });
 });
 
 ipcMain.on("win:moveBy", (_e, dx, dy) => {

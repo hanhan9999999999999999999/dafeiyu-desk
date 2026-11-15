@@ -365,7 +365,11 @@ class Settings {
   load() {
     let migrated = false;
     try {
-      const raw = fs.readFileSync(this.file, "utf8");
+      // 去掉 UTF-8 BOM 再解析：用记事本 / PowerShell 改过这个文件的人不少，
+      // 它们会写进 EF BB BF，而 JSON.parse 见到 BOM 直接抛
+      // 「Unexpected token」——于是整份设置被当成坏文件备份走、回默认值，
+      // 用户看到的是「我的音色和快捷键全没了」。
+      const raw = fs.readFileSync(this.file, "utf8").replace(/^\uFEFF/, "");
       this.data = sanitize(JSON.parse(raw));
       this.lastLoadError = null;
       migrated = migrate(this.data);
@@ -419,7 +423,7 @@ class Settings {
     // 只 merge「自己这次真正改的那几个字段」，其余以盘为准。
     let onDisk = null;
     try {
-      onDisk = sanitize(JSON.parse(fs.readFileSync(this.file, "utf8")));
+      onDisk = sanitize(JSON.parse(fs.readFileSync(this.file, "utf8").replace(/^\uFEFF/, "")));
     } catch (e) {
       onDisk = null;   // 文件不存在或坏了，就当没有，按内存走
     }

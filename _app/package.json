@@ -1,6 +1,6 @@
 {
   "name": "dafeiyu-desk",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "private": true,
   "description": "大肥鱼 · 桌面 Live2D 伴侣",
   "main": "src/main.js",
@@ -76,7 +76,9 @@
     "test:gamemode": "node scripts/test-gamemode.js",
     "test:idle": "node scripts/test-idle-cache.js",
     "test:voice-fast": "node scripts/test-voice-fast.js",
-    "test:globals": "node scripts/test-globals.js"
+    "test:globals": "node scripts/test-globals.js",
+    "test:drag": "node scripts/test-drag-clamp.js",
+    "test:settings-bom": "node scripts/test-settings-bom.js"
   },
   "devDependencies": {
     "electron-builder": "^25.1.8"
