@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<!-- 引导页只加载本地脚本，没有任何远程资源：不需要 unsafe-eval。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'" />
+<title>欢迎</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font:13px/1.6 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif;
+    color:#e8eaf2; user-select:none; overflow:hidden;
+    /* 整张卡片都能拖：用户第一次见到它，多半会想把它挪开 */
+    -webkit-app-region:drag;
+    padding:14px;
+  }
+  .card{
+    height:100%; background:#161821; border:1px solid #2a2f42; border-radius:14px;
+    padding:18px 18px 14px; display:flex; flex-direction:column;
+    box-shadow:0 16px 48px rgba(0,0,0,.45);
+  }
+  .t{display:flex;align-items:center;gap:9px;margin-bottom:3px;}
+  .dot{width:18px;height:18px;border-radius:6px;background:linear-gradient(135deg,#5b8cff,#8f6bff);}
+  h1{font-size:15px;font-weight:600;letter-spacing:.3px;}
+  .sub{color:#8b90a6;font-size:11.5px;margin-bottom:14px;}
+  ul{list-style:none;display:flex;flex-direction:column;gap:9px;flex:1;}
+  li{display:flex;gap:10px;align-items:flex-start;}
+  .k{
+    flex:none; width:92px; padding:2px 6px; border-radius:5px; text-align:center; overflow:hidden; text-overflow:ellipsis;
+    background:#20243a; border:1px solid #3a4260; color:#dfe6f5;
+    font:11.5px/1.5 ui-monospace,Consolas,"Microsoft YaHei UI";
+    white-space:nowrap;
+  }
+  .k.mouse{font-family:"Microsoft YaHei UI",sans-serif;color:#9aa4c4;font-size:11px;}
+  .d{color:#c9d1e6;font-size:12px;padding-top:2px;}
+  .d small{display:block;color:#8b90a6;font-size:11px;}
+  .todo{margin:10px 0 2px;display:flex;flex-direction:column;gap:8px}
+  .todo .it{padding:9px 11px;border-radius:9px;background:rgba(91,140,255,.12);border:1px solid rgba(91,140,255,.34)}
+  .todo .it b{display:block;font-size:12px;color:#cfe0ff;margin-bottom:3px}
+  .todo .it span{display:block;font-size:11.5px;line-height:1.6;color:#9fb0d4}
+  .todo .go{margin-top:7px;width:auto;padding:5px 10px;font-size:11.5px;border-radius:7px;background:#2c3f6e;color:#dbe6ff}
+  .todo .go:hover{background:#3a5288}
+  button{
+    margin-top:14px; flex:none; border:0; background:#5b8cff; color:#fff;
+    font:inherit; font-size:12.5px; padding:9px 0; border-radius:9px; cursor:pointer;
+    -webkit-app-region:no-drag;
+  }
+  button:hover{background:#3d6fe0;}
+  button:active{background:#3d6fe0;}
+  :focus-visible { outline: 2px solid rgba(120, 160, 255, .8); outline-offset: 2px; border-radius: inherit; }
+  button:focus:not(:focus-visible) { outline: none; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="t"><span class="dot"></span><h1>大肥鱼</h1></div>
+    <div class="sub">第一次见面，四句话就能上手</div>
+    <div class="todo" id="todo" hidden></div>
+    <ul>
+      <li><span class="k mouse">右键点我</span><span class="d">打开菜单<small>设置、换模型、对话记录都在里面</small></span></li>
+      <li><span class="k" id="kSummon">Ctrl+Alt+F</span><span class="d">叫出输入框<small>随时打字跟我说话</small></span></li>
+      <li><span class="k" id="kMic">Ctrl+Shift+M</span><span class="d">按下说话<small>再按一次结束</small></span></li>
+      <li><span class="k mouse">拖着我</span><span class="d">换个位置<small>放到你觉得顺眼的角落</small></span></li>
+    </ul>
+    <button id="ok" type="button">知道了</button>
+  </div>
+  <script src="errlog.js"></script>
+<script src="welcome.js"></script>
+</body>
+</html>

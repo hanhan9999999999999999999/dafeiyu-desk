@@ -1,0 +1,13 @@
+{
+	"Type": "Live2D Expression",
+	"IsModelCustomizationExpression": false,
+	"FadeInTime": 0.3,
+	"FadeOutTime": 0.35,
+	"Parameters": [
+		{
+			"Id": "LeanInput",
+			"Value": -30.0,
+			"Blend": "Add"
+		}
+	]
+}

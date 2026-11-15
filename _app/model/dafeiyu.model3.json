@@ -1,0 +1,189 @@
+{
+  "Version": 3,
+  "FileReferences": {
+    "Moc": "dafeiyu.moc3",
+    "Textures": [
+      "tex/tex00.png",
+      "tex/tex01.png",
+      "tex/tex02.png",
+      "tex/tex03.png",
+      "tex/tex04.png"
+    ],
+    "Physics": "dafeiyu.physics3.json",
+    "DisplayInfo": "dafeiyu.cdi3.json",
+    "Motions": {
+      "idle": [
+        {
+          "File": "mot/idle.motion3.json",
+          "FadeInTime": 0.3,
+          "FadeOutTime": 0.3
+        }
+      ],
+      "handup": [
+        {
+          "File": "mot/handup.motion3.json",
+          "FadeInTime": 0.3,
+          "FadeOutTime": 0.3
+        }
+      ],
+      "handdown": [
+        {
+          "File": "mot/handdown.motion3.json",
+          "FadeInTime": 0.3,
+          "FadeOutTime": 0.3
+        }
+      ],
+      "finger": [
+        {
+          "File": "mot/finger.motion3.json",
+          "FadeInTime": 0.3,
+          "FadeOutTime": 0.3
+        }
+      ],
+      "fingerback": [
+        {
+          "File": "mot/fingerback.motion3.json",
+          "FadeInTime": 0.3,
+          "FadeOutTime": 0.3
+        }
+      ],
+      "grass": [
+        {
+          "File": "mot/grass.motion3.json",
+          "FadeInTime": 0.3,
+          "FadeOutTime": 0.3
+        }
+      ],
+      "grassback": [
+        {
+          "File": "mot/grassback.motion3.json",
+          "FadeInTime": 0.3,
+          "FadeOutTime": 0.3
+        }
+      ],
+      "lost": [
+        {
+          "File": "mot/lost.motion3.json",
+          "FadeInTime": 0.3,
+          "FadeOutTime": 0.3
+        }
+      ],
+      "stretch": [
+        {
+          "File": "mot/stretch.motion3.json",
+          "FadeInTime": 0.45,
+          "FadeOutTime": 0.5
+        }
+      ]
+    },
+    "Expressions": [
+      {
+        "Name": "default-body",
+        "File": "exp/default-body.exp3.json"
+      },
+      {
+        "Name": "body-1",
+        "File": "exp/body-1.exp3.json"
+      },
+      {
+        "Name": "body-2",
+        "File": "exp/body-2.exp3.json"
+      },
+      {
+        "Name": "teeth",
+        "File": "exp/teeth.exp3.json"
+      },
+      {
+        "Name": "lean",
+        "File": "exp/lean.exp3.json"
+      },
+      {
+        "Name": "loading",
+        "File": "exp/loading.exp3.json"
+      },
+      {
+        "Name": "monocle",
+        "File": "exp/monocle.exp3.json"
+      },
+      {
+        "Name": "dizzy",
+        "File": "exp/dizzy.exp3.json"
+      },
+      {
+        "Name": "tail",
+        "File": "exp/tail.exp3.json"
+      },
+      {
+        "Name": "smug-eye",
+        "File": "exp/smug-eye.exp3.json"
+      },
+      {
+        "Name": "cold-sweat",
+        "File": "exp/cold-sweat.exp3.json"
+      },
+      {
+        "Name": "tears",
+        "File": "exp/tears.exp3.json"
+      },
+      {
+        "Name": "heart-eyes",
+        "File": "exp/heart-eyes.exp3.json"
+      },
+      {
+        "Name": "finger-on",
+        "File": "exp/finger-on.exp3.json"
+      },
+      {
+        "Name": "finger-off",
+        "File": "exp/finger-off.exp3.json"
+      },
+      {
+        "Name": "chest-cloth",
+        "File": "exp/chest-cloth.exp3.json"
+      },
+      {
+        "Name": "shoes-off",
+        "File": "exp/shoes-off.exp3.json"
+      },
+      {
+        "Name": "blush",
+        "File": "exp/blush.exp3.json"
+      },
+      {
+        "Name": "skirt",
+        "File": "exp/skirt.exp3.json"
+      },
+      {
+        "Name": "bucket",
+        "File": "exp/bucket.exp3.json"
+      },
+      {
+        "Name": "glasses",
+        "File": "exp/glasses.exp3.json"
+      },
+      {
+        "Name": "black-face",
+        "File": "exp/black-face.exp3.json"
+      },
+      {
+        "Name": "x-eyes",
+        "File": "exp/x-eyes.exp3.json"
+      }
+    ]
+  },
+  "Groups": [
+    {
+      "Target": "Parameter",
+      "Name": "EyeBlink",
+      "Ids": [
+        "ParamEyeROpen",
+        "ParamEyeLOpen"
+      ]
+    },
+    {
+      "Target": "Parameter",
+      "Name": "LipSync",
+      "Ids": []
+    }
+  ]
+}

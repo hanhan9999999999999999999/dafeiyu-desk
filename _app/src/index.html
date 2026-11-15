@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; img-src 'self' data: blob:; media-src 'self' blob: data: http://127.0.0.1:*; connect-src 'self' data: blob: http://127.0.0.1:* ws://127.0.0.1:*; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'" />
+<title>大肥鱼</title>
+<style>
+  /* 主窗口的色板：和设置中心同一套，别再出现「设置里是 #5b8cff、挂件里是 #0a84ff」这种两套蓝。 */
+  :root {
+    --acc: #5b8cff;          /* 主色（与 settings.html 的 --accent 一致） */
+    --acc-hi: #7ea3ff;       /* 悬停亮一档 */
+    --acc-glow: rgba(91, 140, 255, .42);
+    --warm: #ffb454;         /* 提醒 / 该吃饭了这类暖色 */
+    --warm-ink: #22160a;     /* 暖色底上的字 */
+    --ico: rgba(255, 255, 255, .9);
+    --ico-dim: rgba(255, 255, 255, .62);
+  }
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  body { width: 100vw; height: 100vh; }
+  /* 整个窗口都可以拖着走 */
+  /* 模型区让出底部一条：输入条在那里出现，不压在她身上 */
+  #stage { position: absolute; left: 0; right: 0; top: 0; bottom: 52px; }
+  #stage canvas { display: block; }
+  /* 对话气泡：贴在她头顶上方，尾巴朝下指着她，多条自动换行 */
+  #bubble {
+    position: absolute; left: 50%; top: 6px;
+    transform: translateX(-50%) translateY(-8px) scale(.94);
+    transform-origin: 50% 100%;
+    width: max-content; max-width: min(302px, calc(100vw - 24px));
+    padding: 11px 16px; border-radius: 20px;
+    /* 液态玻璃：底色比原来更暗更透，让后面的头发真的能看见一点，
+       不然「玻璃」只是个半透明色块。模糊半径加大到 24 才能把下层压成雾。 */
+    background: linear-gradient(180deg, rgba(14, 21, 32, .72), rgba(8, 13, 22, .80));
+    -webkit-backdrop-filter: blur(24px) saturate(1.7);
+    backdrop-filter: blur(24px) saturate(1.7);
+    border: .5px solid rgba(255, 255, 255, .16);
+    color: #eef3ff;
+    font: 13.5px/1.62 "Microsoft YaHei UI", "Segoe UI", sans-serif;
+    letter-spacing: .2px;
+    white-space: normal; word-break: break-word;
+    /* 长回复按高度收口，不砍字数：TTS 念的是全文，气泡也得装得下全文的量。
+       用 max-height 而不是 -webkit-line-clamp——后者依赖 display:-webkit-box，
+       跟这里的 width:max-content 会互相打架。 */
+    max-height: calc(1.62em * 6 + 22px);
+    overflow-y: auto;
+    opacity: 0; pointer-events: none;
+    transition: opacity .2s ease, transform .26s cubic-bezier(.2, .9, .3, 1.2),
+                border-color .3s ease, box-shadow .3s ease;
+    /* 三层阴影：落影 + 上沿内高光（玻璃的「边」）+ 外圈极细描边。
+       内高光是这整套质感里最便宜也最有效的一笔，别省。 */
+    box-shadow: 0 14px 34px rgba(0, 0, 0, .50),
+                inset 0 1px 0 rgba(255, 255, 255, .14),
+                inset 0 0 22px rgba(120, 170, 255, .05);
+  }
+  /* 滚动条：默认的粗灰条会把玻璃感全毁掉 */
+  #bubble::-webkit-scrollbar { width: 5px; }
+  #bubble::-webkit-scrollbar-track { background: transparent; }
+  #bubble::-webkit-scrollbar-thumb {
+    background: rgba(150, 186, 255, .34); border-radius: 3px;
+  }
+  #bubble::-webkit-scrollbar-thumb:hover { background: rgba(150, 186, 255, .55); }
+  /* 富文本：气泡里的多行内容靠这几条撑开，不然换行会被 CSS 折成一片。 */
+  #bubble .ln { min-height: 1em; }
+  #bubble .hd { font-weight: 600; margin-top: 3px; color: #f2f6ff; letter-spacing: .2px; }
+  #bubble .li { display: flex; gap: 5px; }
+  #bubble .li .bul { flex: 0 0 auto; color: rgba(150, 186, 255, .8); }
+  #bubble code { font: 11.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+    background: rgba(120, 160, 255, .14); border-radius: 4px; padding: 0 3px; }
+  #bubble pre.code { margin: 4px 0; padding: 6px 8px; border-radius: 7px; overflow-x: auto;
+    background: rgba(6, 11, 22, .66); border: .5px solid rgba(120, 160, 255, .18); }
+  #bubble pre.code code { background: none; padding: 0; white-space: pre; display: block; }
+  #bubble strong { font-weight: 600; color: #fff; }
+  #bubble em { color: #cfe0ff; }
+  #bubble del { opacity: .62; }
+  #bubble.on { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  /* 内容溢出六行时才收回鼠标事件：不然长回复明明有滚动条却滚不动。
+     短回复保持 pointer-events:none，鼠标照样穿透它去拖窗口。 */
+  #bubble.on.scroll {
+    pointer-events: auto;
+    /* 底部压一层内阴影，最后一行字自然淡下去——比光秃秃被切断好看，
+       也顺便告诉人「下面还有」。用 inset 阴影而不是 mask，是因为 mask
+       会让 backdrop-filter 直接失效，玻璃感就没了。 */
+    box-shadow: 0 14px 34px rgba(0, 0, 0, .50),
+                inset 0 1px 0 rgba(255, 255, 255, .14),
+                inset 0 0 22px rgba(120, 170, 255, .05),
+                inset 0 -20px 14px -14px rgba(6, 11, 20, .95);
+  }
+  /* 情绪色：她生气、害羞、撒娇时边框和光晕换颜色 —— 不换底色，换的是「她说这话时的温度」 */
+  #bubble.happy   { border-color: rgba(120, 230, 190, .42); box-shadow: 0 12px 30px rgba(0,0,0,.46), 0 0 18px rgba(120,230,190,.14), inset 0 1px 0 rgba(255,255,255,.09); }
+  #bubble.shy     { border-color: rgba(255, 150, 200, .44); box-shadow: 0 12px 30px rgba(0,0,0,.46), 0 0 18px rgba(255,150,200,.16), inset 0 1px 0 rgba(255,255,255,.09); }
+  #bubble.annoyed { border-color: rgba(255, 170, 90, .46); box-shadow: 0 12px 30px rgba(0,0,0,.46), 0 0 18px rgba(255,170,90,.15), inset 0 1px 0 rgba(255,255,255,.09); }
+  #bubble.sad     { border-color: rgba(140, 165, 220, .34); }
+  /* 小尾巴删掉了（2026-11-06）。
+     两个原因：①#bubble 为了长回复能滚动了加了 overflow-y:auto，
+     伪元素 bottom:-6px 超出容器会被裁掉大半，剩下一角看着像个不知道哪来的竖条；
+     ②苹果那套浮窗本来就不给气泡加尾巴，靠位置关系说话就够了，
+     硬贴一个残缺的三角反而更乱。 */
+  /* 说话时的轻微跳动，像真的在讲话 */
+  @keyframes bubble-talk {
+    0%, 100% { transform: translateX(-50%) translateY(0) scale(1); }
+    50% { transform: translateX(-50%) translateY(-2px) scale(1.012); }
+  }
+  #bubble.on.talk { animation: bubble-talk 1.1s ease-in-out infinite; }
+  /* 语音按钮 —— macOS 圆形控件：细白边 + 毛玻璃 + 系统蓝强调色 */
+  /* 输入行里所有圆钮：◎ / ↵ / ♥ 这些符号 Arial 不全，统一指定带符号的字体，
+     否则会掉到豆腐块（打包版第一版就踩了：♥ 显示成一个方块）。 */
+  #dock button {
+    font-family: "Segoe UI Symbol", "Segoe UI Emoji", "Apple Symbols", sans-serif;
+  }
+
+  #fish-voice {
+    position: static; flex: 0 0 auto;
+    width: 30px; height: 30px; border-radius: 50%;
+    border: .5px solid rgba(255, 255, 255, .16);
+    background: rgba(255, 255, 255, .08);
+    -webkit-backdrop-filter: blur(20px) saturate(1.6);
+    backdrop-filter: blur(20px) saturate(1.6);
+    color: var(--ico);
+    font-size: 13px; line-height: 1; font-weight: 500;
+    cursor: pointer; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 .5px 1px rgba(0, 0, 0, .28);
+    transition: background .18s ease, color .18s ease, transform .12s ease, box-shadow .18s ease;
+    -webkit-app-region: no-drag;
+  }
+  #fish-voice:hover { background: rgba(255, 255, 255, .13); color: #fff; }
+  #fish-voice.on { background: var(--acc); border-color: transparent; color: #fff; box-shadow: 0 0 0 .5px rgba(91,140,255,.5), 0 2px 8px var(--acc-glow); }
+  #fish-voice.think { background: var(--warm); border-color: transparent; color: var(--warm-ink); }
+  /* 图标统一 16px 线性；思考态直接复用下面那条脉冲，不再靠换字符表达状态。 */
+  #fish-voice svg,
+  #dock .inputline button svg { width: 16px; height: 16px; display: block; }
+  #fish-voice.think svg { animation: voice-pulse 1.1s ease-in-out infinite; }
+  @keyframes voice-pulse {
+    0%, 100% { opacity: .55; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.12); }
+  }
+  /* 空状态：安装包不再带模型（版权在原画师手上，不随包分发）。
+     没导入模型时窗口不能是一片透明——那样用户只会以为程序没启动。 */
+  #noModel { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; -webkit-app-region: no-drag; overflow: hidden; }
+  #noModel.on { display: flex; }
+  .nm-card {
+    width: 100%; max-width: 292px; padding: 20px 18px 15px; border-radius: 20px; text-align: center;
+    /* 兜底：窗口只有 356×512。导入失败时提示区会变成「错误 + 三条自查」，
+       万一哪天文案再长几行，卡片自己滚，而不是把最后一行顶出窗口（那样等于没写）。
+       三个坑：① max-height:100% 在 flex item 上会被当 auto，必须用 vh；
+       ② border-box：默认 content-box 下 max-height 不含 padding+border，
+          max-height 算成 480 却量出 517（480+35+2），等于没约束；
+       ③ 卡片要能滚，所以 overflow-y 必须是 auto。 */
+    box-sizing: border-box; max-height: calc(100vh - 32px); overflow-y: auto;
+    background: linear-gradient(180deg, rgba(15,22,34,.92), rgba(9,14,24,.95));
+    border: 1px solid rgba(120,160,255,.22);
+    box-shadow: 0 18px 46px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
+    color: #e9f0ff; font: 13px/1.6 "Microsoft YaHei UI", "Segoe UI", sans-serif;
+  }
+  .nm-ico {
+    width: 54px; height: 54px; margin: 0 auto 10px; border-radius: 17px;
+    display: grid; place-items: center; font-size: 26px;
+    background: radial-gradient(circle at 30% 25%, #5b8cff, #24356a);
+    box-shadow: 0 8px 22px rgba(70,120,255,.35);
+  }
+  .nm-card h4 { margin: 0 0 5px; font-size: 15px; font-weight: 600; letter-spacing: .2px; }
+  .nm-card p { margin: 0 0 14px; font-size: 12px; color: #9fb0cc; line-height: 1.7; }
+  .nm-btn {
+    display: block; width: 100%; height: 34px; border-radius: 9px; border: 1px solid transparent;
+    cursor: pointer; color: #fff; font: 13px "Microsoft YaHei UI", "Segoe UI", sans-serif;
+    background: linear-gradient(180deg, #5b8cff, #3d6fe0);
+    box-shadow: 0 6px 16px rgba(60,110,230,.35);
+  }
+  .nm-btn.ghost { margin-top: 8px; background: rgba(255,255,255,.05); border-color: rgba(120,150,210,.28); color: #c9d6ee; box-shadow: none; }
+  .nm-btn:disabled { opacity: .55; cursor: default; }
+  .nm-why { margin: 9px 0 3px; padding: 8px 10px; border-radius: 8px; font-size: 11.5px; line-height: 1.6;
+    color: #ffd9a0; background: rgba(255, 184, 72, .12); border: 1px solid rgba(255, 184, 72, .3); text-align: left; }
+  .nm-why[hidden] { display: none; }
+  .nm-tip { margin-top: 10px; font-size: 11px; color: #6d7c95; line-height: 1.65; white-space: pre-line; }
+  /* 「什么样的文件才认」折叠块。空状态窗口 356×512，卡片本身约 260px 高，
+     展开后仍在窗口内。放这段是因为用户在这一步最常见的两种失败——
+     下到 Cubism 2 的模型（只有 model.json）、选到了下载站点外层那层目录——
+     光看「选一个 Live2D 模型包」永远猜不到。 */
+  .nm-help { margin-top: 10px; text-align: left; font-size: 11.5px; color: #93a3bd; }
+  .nm-help summary { cursor: pointer; padding: 4px 0; color: #a9bce0; list-style: none; user-select: none; }
+  .nm-help summary::-webkit-details-marker { display: none; }
+  .nm-help summary::before { content: "▸ "; }
+  .nm-help[open] summary::before { content: "▾ "; }
+  .nm-help ul { margin: 2px 0 0; padding-left: 14px; line-height: 1.5; }
+  .nm-help li { margin-bottom: 2px; }
+  .nm-help code {
+    font: 11px ui-monospace, Consolas, monospace; color: #cfe0ff;
+    background: rgba(120,160,255,.13); padding: 0 3px; border-radius: 3px;
+  }
+  /* 卡片被内容撑到需要滚动时，别给一条能看见的粗滚动条 —— 透明窗口上很难看 */
+  .nm-card::-webkit-scrollbar { width: 5px; }
+  .nm-card::-webkit-scrollbar-thumb { background: rgba(120,160,255,.25); border-radius: 3px; }
+  .nm-card::-webkit-scrollbar-track { background: transparent; }
+  #err {
+    position: absolute; left: 12px; bottom: 66px; right: 12px;
+    /* 66px 而不是 12px：输入条浮在底边（bottom:8px、高 50px），错误条压在
+       12px 上会被它整个盖住——鼠标一靠近底边，正在看的报错就没了。 */
+    color: #ff9a9a; font: 12px/1.5 monospace; white-space: pre-wrap;
+    display: none;
+    z-index: 40;
+    /* 报错常常压在她浅色的衣服上，光靠红字读不出来——垫一层玻璃底。 */
+    padding: 6px 9px; border-radius: 8px;
+    background: rgba(6, 11, 20, .72);
+    backdrop-filter: blur(6px);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, .8);
+  }
+
+  /* ── 底部输入条（macOS 浮层）──────────────────────────────────
+     模型占满整个窗口，输入条浮在底边。
+     默认完全透明、不接收鼠标（pointer-events:none），
+     只有鼠标靠近底部 118px 才浮现——所以平时不会压在她身上。
+     「自动隐藏」可以在设置面板里关掉，关掉就常显。 */
+  #dock {
+    position: absolute; left: 10px; right: 10px; bottom: 8px;
+    display: flex; flex-direction: column; gap: 0;
+    padding: 0 9px;
+    height: 50px; box-sizing: border-box;
+    justify-content: center;
+    /* 浮动胶囊，不再是贴着底边的一条。左右留 10px、四角全圆——
+       贴着窗口边缘的条看起来像「系统状态栏」，浮起来才像「她和你说话的地方」。
+       底色要够深：她穿白裙子时输入条正压在白衣服上，浅色玻璃会让图标和
+       placeholder 直接消失。 */
+    background: rgba(10, 15, 24, .93);
+    -webkit-backdrop-filter: blur(28px) saturate(1.8);
+    backdrop-filter: blur(28px) saturate(1.8);
+    border: .5px solid rgba(255, 255, 255, .14);
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .42),
+                inset 0 1px 0 rgba(255, 255, 255, .10);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(7px);
+    transition: opacity .13s ease, transform .16s cubic-bezier(.22, .8, .3, 1);
+    z-index: 30;
+  }
+  #dock.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
+
+
+  /* 记录区：你说 / 发出 / 她回 */
+  /* 记录区做成向上浮出的浮层：它只在她说话/我听写时出现，
+     悬在模型下半部分，平时不占位——比常驻半透明板干净得多。 */
+  #dock .log {
+    display: none; flex-direction: column; gap: 5px;
+    /* 相对 dock 定位，dock 自己已经有 10px 边距，这里再撑出去只会让它更宽 */
+    position: absolute; left: 0; right: 0; bottom: calc(100% + 6px);
+    max-height: 190px; overflow-y: auto; overflow-x: hidden;
+    padding: 8px 9px; border-radius: 14px;
+    background: linear-gradient(180deg, rgba(12, 18, 28, .95), rgba(7, 11, 18, .96));
+    -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    backdrop-filter: blur(24px) saturate(1.6);
+    border: .5px solid rgba(255, 255, 255, .14);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .48),
+                inset 0 1px 0 rgba(255, 255, 255, .10);
+    padding-right: 9px;
+    scrollbar-width: thin; scrollbar-color: rgba(120,160,230,.45) transparent;
+  }
+  #dock .log::-webkit-scrollbar { width: 5px; }
+  #dock .log::-webkit-scrollbar-thumb { background: rgba(120,160,230,.4); border-radius: 3px; }
+  #dock .log.show { display: flex; }
+
+  #dock .row {
+    display: flex; align-items: flex-start; gap: 7px;
+    font: 12.5px/1.55 "Microsoft YaHei UI", "Segoe UI", sans-serif;
+    animation: dock-in .22s cubic-bezier(.2, .9, .3, 1.15);
+  }
+  @keyframes dock-in {
+    from { opacity: 0; transform: translateY(5px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  #dock .row .tag {
+    flex: 0 0 auto; padding: 1px 6px; border-radius: 5px;
+    font-size: 10.5px; letter-spacing: .3px; line-height: 1.6;
+    color: #a9bdd8; background: rgba(90, 120, 175, .22);
+    border: 1px solid rgba(120, 155, 215, .26);
+  }
+  #dock .row.me .tag   { color: #8fb8ff; background: rgba(70, 110, 190, .26); border-color: rgba(110, 155, 235, .34); }
+  #dock .row.sent .tag { color: #b6d4a8; background: rgba(80, 130, 90, .24); border-color: rgba(120, 190, 130, .3); }
+  #dock .row.her .tag  { color: #ffc9e0; background: rgba(170, 80, 130, .24); border-color: rgba(225, 130, 180, .3); }
+  #dock .row .txt {
+    flex: 1 1 auto; min-width: 0; color: #e7eeff; word-break: break-word;
+    /* 她说长段落时别把整个记录区一条占满：超出的自己滚 */
+    max-height: 6.2em; overflow-y: auto; scrollbar-width: thin;
+    scrollbar-color: rgba(120,160,230,.4) transparent;
+  }
+  #dock .row.dim .txt { color: rgba(200, 214, 240, .5); font-style: italic; }
+
+  /* 输入行 */
+  #dock .inputline {
+    display: flex; align-items: center; gap: 7px;
+  }
+  /* 输入框 —— macOS 搜索框：低对比底 + 极细边 + 聚焦系统蓝描边 */
+  #dock input[type="text"] {
+    flex: 1 1 auto; min-width: 0; height: 30px;
+    padding: 0 12px; border-radius: 999px;
+    background: rgba(255, 255, 255, .07);
+    border: .5px solid rgba(255, 255, 255, .12);
+    color: rgba(255, 255, 255, .92);
+    font: 12.5px/30px -apple-system, "SF Pro Text", "Microsoft YaHei UI", "Segoe UI", sans-serif;
+    outline: none;
+    transition: background .18s ease, border-color .18s ease, box-shadow .18s ease;
+  }
+  #dock input[type="text"]::placeholder { color: rgba(198, 212, 236, .72); }
+  #dock input[type="text"]:focus {
+    background: rgba(255, 255, 255, .11);
+    border-color: rgba(10, 132, 255, .75);
+    box-shadow: 0 0 0 3.5px rgba(10, 132, 255, .18);
+  }
+  /* 发送键 —— 系统蓝实心胶囊。原来是个 30px 圆钮里画 ↵，符号比字更难认；
+     换成文字胶囊，一眼就知道按下去会发生什么。 */
+  #dock .send {
+    flex: 0 0 auto; height: 30px; padding: 0 14px; border-radius: 999px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--acc); border: none;
+    color: #fff; font-size: 12.5px; font-weight: 500; letter-spacing: .3px;
+    cursor: pointer;
+    transition: background .16s ease, transform .12s ease, opacity .16s ease;
+    box-shadow: 0 2px 10px var(--acc-glow);
+  }
+  #dock .send:hover { background: var(--acc-hi); }
+  #dock .send:active { transform: scale(.92); }
+  #dock .send:disabled { opacity: .32; box-shadow: none; cursor: default; }
+
+  /* ── 养成面板 ─────────────────────────────── */
+  #petBtn,
+  #chatBtn,
+  #seeBtn {
+    flex: 0 0 auto; width: 30px; height: 30px; border-radius: 999px;
+    border: .5px solid rgba(255,255,255,.16); background: rgba(255,255,255,.1);
+    color: var(--ico); font-size: 14px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0;
+    transition: background .14s, transform .14s;
+  }
+  #petBtn:hover,
+  #chatBtn:hover,
+  #seeBtn:hover { background: rgba(255,255,255,.17); }
+  #petBtn:active,
+  #chatBtn:active,
+  #seeBtn:active { transform: scale(.94); }
+  #petBtn.warn { background: var(--warm); border-color: transparent; color: var(--warm-ink); }
+
+  #petSay {
+    margin-top: 9px; font-size: 11.5px; color: rgba(255,255,255,.62);
+    min-height: 17px; line-height: 1.45;
+  }
+
+</style>
+</head>
+<body>
+  <div id="stage"></div>
+  <!-- 没装模型时的空状态：直接给导入入口，别让人对着一个透明窗口发呆 -->
+  <div id="noModel">
+    <div class="nm-card">
+      <div class="nm-ico">&#128031;</div>
+      <h4>先给她找一个身体</h4>
+      <p>安装包里不带模型（版权在原画师手上，不能随程序分发）。<br />选一个 Live2D 模型包，她就有样子了。</p>
+      <div class="nm-why" id="nmWhy" hidden></div>
+      <button class="nm-btn" id="nmZip">导入压缩包（.zip）</button>
+      <button class="nm-btn ghost" id="nmDir">选择解压后的文件夹</button>
+      <div class="nm-tip" id="nmTip">只复制到本机用户目录，不动原文件 · 支持 Cubism 3 / 4</div>
+      <details class="nm-help" id="nmHelp">
+        <summary>什么样的文件才认？</summary>
+        <ul>
+          <li><b>Cubism 3 / 4</b>：有 <code>xxx.model3.json</code>。Cubism 2 的 <code>model.json</code> 不认。</li>
+          <li>同目录还要 <code>xxx.moc3</code> 和贴图 <code>*.png</code>，缺一不可。</li>
+          <li>整包 <code>.zip</code> 直接选，外面多套一层也行。</li>
+          <li>要密码的整合包，解出来多半是坏的。</li>
+        </ul>
+      </details>
+    </div>
+  </div>
+
+  <div id="bubble" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div id="err" role="alert" aria-live="assertive"></div>
+  <!-- 底部对话面板：打字输入 + 语音转写回显 -->
+  <div id="dock">
+    <div class="log" id="dockLog"></div>
+    <div class="inputline">
+      <button id="seeBtn" title="看屏幕" aria-label="看屏幕"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.4 12S5.9 5.6 12 5.6 21.6 12 21.6 12 18.1 18.4 12 18.4 2.4 12 2.4 12z" /><circle cx="12" cy="12" r="2.7" /></svg></button>
+      <button id="chatBtn" title="对话记录" aria-label="对话记录"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.8 4.9h14.4v10.4H9.9l-3.8 3.3v-3.3H4.8z" /><path d="M8.5 8.8h7M8.5 11.6h4.4" /></svg></button>
+      <button id="petBtn" title="看看她" aria-label="看看她"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19.6S4.9 15.2 4.9 10.4a3.9 3.9 0 0 1 7.1-2.1 3.9 3.9 0 0 1 7.1 2.1c0 4.8-7.1 9.2-7.1 9.2z" /></svg></button>
+      <input id="dockInput" type="text" autocomplete="off" spellcheck="false"
+             aria-label="和她说点什么" placeholder="打字说点什么，回车发送…" />
+      <button class="send" id="dockSend" title="发送">发送</button>
+    </div>
+  </div>
+
+  <!-- 锐化：3×3 反锐化掩模，总和 1.0 不改变亮度；只作用于画布，不动 UI -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <filter id="fish-sharpen" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feConvolveMatrix order="3" preserveAlpha="true"
+        kernelMatrix="0 -0.34 0  -0.34 2.36 -0.34  0 -0.34 0" />
+    </filter>
+  </svg>
+  <script src="../vendor/live2dcubismcore.min.js"></script>
+  <script src="../vendor/live2d-vendor.js"></script>
+  <script src="lines.js"></script>
+  <script src="motions.js"></script>
+  <script src="motions-extra.js"></script>
+  <script src="motion3.js"></script>
+  <script src="pet.js"></script>
+  <script src="dock.js"></script>
+  <script src="lib/micerr.js"></script>
+  <script src="lib/voiceerr.js"></script>
+  <script src="voice.js"></script>
+  <script src="petpanel.js"></script>
+  <script src="lib/curve.js"></script>
+  <script src="renderer.js"></script>
+  <script src="boot.js"></script>
+</body>
+</html>

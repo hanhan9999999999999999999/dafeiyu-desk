@@ -1,0 +1,30 @@
+{
+  "petManifestVersion": 2,
+  "id": "dafeiyu",
+  "displayName": "大肥鱼",
+  "description": "小代码酱的 Live2D 化身。原画及拆分 神宫凉子，Live2D 建模 霓虹猫_NeonNeko。",
+  "version": "1.0.0",
+  "author": "神宫凉子 / 霓虹猫_NeonNeko",
+  "license": "DeepSeek 免费 Live2D 模型：允许个人直播/视频/调参/二创；禁止二次销售与重新分发完整模型文件。原画及拆分 神宫凉子，Live2D 建模 霓虹猫_NeonNeko。",
+  "renderer": "live2d",
+  "live2d": {
+    "model": "dafeiyu.model3.json",
+    "scale": 1,
+    "motions": {
+      "idle": "idle",
+      "waiting": "idle",
+      "thinking": "finger",
+      "tool": "grass",
+      "review": "idle",
+      "done": "handup",
+      "failed": "handdown"
+    },
+    "expressions": {
+      "thinking": "smug-eye",
+      "tool": "default-body",
+      "done": "heart-eyes",
+      "failed": "cold-sweat",
+      "waiting": "blush"
+    }
+  }
+}

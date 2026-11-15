@@ -1,0 +1,13 @@
+{
+	"Type": "Live2D Expression",
+	"IsModelCustomizationExpression": false,
+	"FadeInTime": 0.3,
+	"FadeOutTime": 0.35,
+	"Parameters": [
+		{
+			"Id": "Clothes2",
+			"Value": 0.4000000059604645,
+			"Blend": "Add"
+		}
+	]
+}

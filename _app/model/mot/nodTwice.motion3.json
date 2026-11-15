@@ -1,0 +1,105 @@
+{
+ "Version": 3,
+ "Meta": {
+  "Duration": 1.25,
+  "Fps": 30.0,
+  "Loop": false,
+  "AreBeziersRestricted": false,
+  "CurveCount": 4,
+  "TotalSegmentCount": 17,
+  "TotalPointCount": 21,
+  "UserDataCount": 0,
+  "TotalUserDataSize": 0,
+  "FadeInTime": 0.35,
+  "FadeOutTime": 0.45
+ },
+ "Curves": [
+  {
+   "Target": "Parameter",
+   "Id": "ParamAngleY",
+   "Segments": [
+    0,
+    0,
+    0,
+    0,
+    0.14,
+    8.0,
+    0,
+    0.28,
+    1.5,
+    0,
+    0.45,
+    6.0,
+    0,
+    0.62,
+    0.5,
+    0,
+    0.9,
+    2.0,
+    0,
+    1.25,
+    0
+   ]
+  },
+  {
+   "Target": "Parameter",
+   "Id": "ParamEyeLOpen",
+   "Segments": [
+    0,
+    0,
+    1,
+    0,
+    0.28,
+    0.88,
+    0,
+    0.45,
+    1,
+    0,
+    0.62,
+    0.92,
+    0,
+    1.25,
+    1
+   ]
+  },
+  {
+   "Target": "Parameter",
+   "Id": "ParamEyeROpen",
+   "Segments": [
+    0,
+    0,
+    1,
+    0,
+    0.28,
+    0.88,
+    0,
+    0.45,
+    1,
+    0,
+    0.62,
+    0.92,
+    0,
+    1.25,
+    1
+   ]
+  },
+  {
+   "Target": "Parameter",
+   "Id": "ParamBodyAngleX",
+   "Segments": [
+    0,
+    0,
+    0,
+    0,
+    0.28,
+    -0.8,
+    0,
+    0.62,
+    -0.6,
+    0,
+    1.25,
+    0
+   ]
+  }
+ ]
+}

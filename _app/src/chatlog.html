@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; media-src 'self' blob: data: http://127.0.0.1:*; connect-src 'self' data: blob: http://127.0.0.1:* ws://127.0.0.1:*; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'" />
+  <title>大肥鱼 · 对话记录</title>
+  <style>
+    :root {
+      --bg: #12141d;
+      --txt: #EEF1F9;
+      --dim: #8991A8;
+      --faint: #5F677E;
+      --line: rgba(255, 255, 255, .075);
+      --blue: #6E9DFF;
+      --pink: #FF8FBB;
+      --card: rgba(255, 255, 255, .055);
+      --danger: #FF6B81;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: transparent;
+      overflow: hidden;
+      color: var(--txt);
+      font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+    }
+
+    /* 外层留 7px 透明边，让阴影和圆角有地方落 */
+    #app {
+      position: absolute; inset: 7px;
+      display: flex; flex-direction: column;
+      border-radius: 20px;
+      overflow: hidden;
+      background:
+        radial-gradient(120% 70% at 8% -12%, rgba(255, 143, 187, .15), transparent 58%),
+        radial-gradient(110% 70% at 105% 2%, rgba(110, 157, 255, .14), transparent 55%),
+        linear-gradient(168deg, rgba(32, 35, 49, .975), rgba(15, 17, 24, .975));
+      border: 1px solid rgba(255, 255, 255, .09);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .07);
+      backdrop-filter: blur(34px) saturate(1.6);
+    }
+
+    /* ---------- 标题栏 ---------- */
+    .head {
+      -webkit-app-region: drag;
+      flex: 0 0 58px;
+      display: flex; align-items: center; gap: 10px;
+      padding: 0 12px 0 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .logo {
+      width: 32px; height: 32px; flex: none;
+      display: grid; place-items: center;
+      border-radius: 11px;
+      font-size: 15px; font-weight: 700; color: #fff;
+      background: linear-gradient(145deg, #FF9FC5, #C98BFF 55%, #7FAFFF);
+      box-shadow: 0 3px 12px rgba(201, 139, 255, .35), inset 0 1px 0 rgba(255, 255, 255, .35);
+      letter-spacing: 0;
+    }
+
+    .brand { flex: 1; min-width: 0; }
+    .brand b { display: block; font-size: 13.5px; font-weight: 600; letter-spacing: .6px; }
+    .brand small { display: block; margin-top: 2px; font-size: 10.5px; color: var(--dim); letter-spacing: .3px; }
+
+    .acts { -webkit-app-region: no-drag; display: flex; align-items: center; gap: 4px; }
+    .iconbtn {
+      width: 28px; height: 28px; border: 0; border-radius: 9px;
+      background: transparent; color: #9AA3BA; cursor: pointer;
+      display: grid; place-items: center;
+      transition: background .15s, color .15s;
+      font: inherit;
+    }
+    .iconbtn:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+    .iconbtn:active { background: rgba(255, 255, 255, .13); }
+    .iconbtn.danger { color: #FFB3C0; background: rgba(255, 90, 120, .18); width: auto; padding: 0 9px; font-size: 11.5px; }
+    .iconbtn svg { width: 15px; height: 15px; }
+
+    /* ---------- 搜索 / 过滤 ---------- */
+    .toolbar {
+      flex: 0 0 auto;
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 14px 8px;
+    }
+    .search {
+      flex: 1; min-width: 0;
+      display: flex; align-items: center; gap: 7px;
+      height: 30px; padding: 0 10px;
+      border-radius: 9px;
+      background: rgba(255, 255, 255, .055);
+      border: .5px solid rgba(255, 255, 255, .09);
+      transition: border-color .16s, background .16s;
+    }
+    .search:focus-within { border-color: rgba(110, 157, 255, .65); background: rgba(110, 157, 255, .07); }
+    .search svg { width: 13px; height: 13px; flex: none; color: #7B8398; }
+    .search input {
+      flex: 1; min-width: 0; border: 0; outline: none; background: transparent;
+      color: var(--txt); font: 12px/30px inherit;
+    }
+    .search input::placeholder { color: #656D83; }
+
+    .chips { display: flex; gap: 3px; background: rgba(255, 255, 255, .05); border-radius: 9px; padding: 3px; flex: none; }
+    .chip {
+      border: 0; background: transparent; color: var(--dim);
+      font: 11px/1 inherit; padding: 6px 8px; border-radius: 6px; cursor: pointer;
+      transition: background .15s, color .15s;
+      white-space: nowrap;
+    }
+    .chip:hover { color: #D7DDF0; }
+    .chip.on { background: rgba(255, 255, 255, .12); color: #fff; }
+
+    /* ---------- 时间线 ---------- */
+    main {
+      flex: 1 1 auto; min-height: 0;
+      overflow-y: auto; overflow-x: hidden;
+      padding: 2px 14px 14px;
+      scroll-behavior: smooth;
+      mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 6px), transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 6px), transparent 100%);
+    }
+    main::-webkit-scrollbar { width: 5px; }
+    main::-webkit-scrollbar-thumb { background: rgba(140, 160, 210, .28); border-radius: 4px; }
+    main::-webkit-scrollbar-thumb:hover { background: rgba(140, 160, 210, .45); }
+
+    .day {
+      display: flex; align-items: center; gap: 9px;
+      margin: 16px 4px 10px;
+      color: var(--faint); font-size: 10.5px; letter-spacing: .6px;
+    }
+    .day::before, .day::after {
+      content: ""; flex: 1; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .09), transparent);
+    }
+    .day span { flex: none; }
+
+    .msg { display: flex; align-items: flex-end; gap: 8px; margin: 11px 2px; }
+    .msg.me { flex-direction: row-reverse; }
+
+    .ava {
+      width: 26px; height: 26px; flex: none; border-radius: 9px;
+      display: grid; place-items: center;
+      font-size: 11px; font-weight: 700;
+      background: rgba(255, 255, 255, .07);
+      border: 1px solid rgba(255, 255, 255, .09);
+      color: #C7D0E6;
+    }
+    .msg.me .ava { background: linear-gradient(150deg, rgba(110, 157, 255, .38), rgba(110, 157, 255, .16)); color: #DCE8FF; border-color: rgba(120, 165, 255, .3); }
+    .msg.her .ava { background: linear-gradient(150deg, rgba(255, 143, 187, .34), rgba(201, 139, 255, .16)); color: #FFE2EF; border-color: rgba(255, 160, 200, .26); }
+
+    .body { max-width: min(80%, 560px); display: flex; flex-direction: column; gap: 3px; }
+    .msg.me .body { align-items: flex-end; }
+
+    .meta { display: flex; align-items: baseline; gap: 6px; padding: 0 3px; font-size: 10px; color: var(--faint); }
+    .meta .who { color: #9AA3BA; font-size: 10.5px; }
+    .msg.me .meta .who { color: #8FB4FF; }
+    .msg.her .meta .who { color: #FFA9CB; }
+
+    .bubble {
+      position: relative;
+      padding: 9px 12px;
+      border-radius: 14px;
+      font-size: 12.8px; line-height: 1.62;
+      white-space: pre-wrap; word-break: break-word;
+      border: 1px solid rgba(255, 255, 255, .075);
+      background: rgba(255, 255, 255, .06);
+      color: #E9EDF8;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, .14);
+      user-select: text;
+    }
+    .msg.me .bubble {
+      border-bottom-right-radius: 5px;
+      background: linear-gradient(150deg, rgba(86, 132, 235, .92), rgba(64, 103, 200, .92));
+      border-color: rgba(150, 185, 255, .26);
+      color: #fff;
+      box-shadow: 0 5px 18px rgba(50, 95, 200, .26);
+    }
+    .msg.her .bubble {
+      border-bottom-left-radius: 5px;
+      background: linear-gradient(155deg, rgba(66, 52, 72, .9), rgba(44, 42, 58, .92));
+      border-color: rgba(255, 150, 190, .13);
+    }
+    .bubble .caret {
+      display: inline-block; width: 2px; height: 12px; margin-left: 2px;
+      vertical-align: -1px; border-radius: 2px; background: var(--pink);
+      animation: blink 1s steps(1, end) infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .typing { display: inline-flex; align-items: center; gap: 4px; height: 16px; padding: 0 2px; }
+    .typing i {
+      width: 5px; height: 5px; border-radius: 50%; background: #FFA9CB;
+      animation: dot 1.15s ease-in-out infinite;
+    }
+    .typing i:nth-child(2) { animation-delay: .15s; }
+    .typing i:nth-child(3) { animation-delay: .3s; }
+    @keyframes dot { 0%, 70%, 100% { opacity: .28; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-2px); } }
+
+    /* ---------- 空状态 ---------- */
+    .empty {
+      height: 100%; min-height: 240px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 9px; color: var(--dim); text-align: center; padding: 28px;
+    }
+    .empty .big {
+      width: 58px; height: 58px; border-radius: 20px;
+      display: grid; place-items: center; font-size: 25px;
+      background: linear-gradient(150deg, rgba(255, 143, 187, .2), rgba(110, 157, 255, .12));
+      border: 1px solid rgba(255, 255, 255, .1);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1);
+      margin-bottom: 3px;
+    }
+    .empty b { font-size: 13px; color: #C9D1E5; font-weight: 500; }
+    .empty span { font-size: 11px; line-height: 1.7; color: var(--faint); max-width: 230px; }
+
+    /* ---------- 回到底部 ---------- */
+    #jump {
+      position: absolute; right: 20px; bottom: 44px;
+      height: 28px; padding: 0 11px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, .13);
+      background: rgba(38, 42, 58, .94);
+      color: #D7DEF0; font: 11px/26px inherit;
+      cursor: pointer; display: flex; align-items: center; gap: 4px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .38);
+      opacity: 0; transform: translateY(5px); pointer-events: none;
+      transition: opacity .18s, transform .18s;
+      z-index: 3;
+    }
+    #jump.show { opacity: 1; transform: none; pointer-events: auto; }
+    #jump:hover { background: rgba(52, 58, 78, .98); }
+
+    footer {
+      flex: 0 0 auto;
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 7px 16px 9px;
+      border-top: 1px solid var(--line);
+      color: var(--faint); font-size: 10px; letter-spacing: .3px;
+    }
+    footer .dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #6EE7A8; box-shadow: 0 0 6px rgba(110, 231, 168, .7); margin-right: 5px; vertical-align: 1px; }
+    :focus-visible { outline: 2px solid rgba(110, 157, 255, .8); outline-offset: 2px; border-radius: inherit; }
+  button:focus:not(:focus-visible) { outline: none; }
+</style>
+</head>
+
+<body>
+  <div id="app">
+    <header class="head">
+      <div class="logo">鱼</div>
+      <div class="brand">
+        <b>对话记录</b>
+        <small id="sub">加载中…</small>
+      </div>
+      <div class="acts">
+        <button class="iconbtn" id="exportBtn" title="导出为 Markdown">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 4v10m0 0l-3.4-3.4M12 14l3.4-3.4" />
+            <path d="M5 15.5V19a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5" />
+          </svg>
+        </button>
+        <button class="iconbtn" id="clearBtn" title="清空记录">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" />
+          </svg>
+        </button>
+        <button class="iconbtn" id="closeBtn" title="关闭" aria-label="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <label class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <circle cx="11" cy="11" r="6.5" />
+          <path d="M16 16l4.2 4.2" />
+        </svg>
+        <input id="q" aria-label="搜索对话" type="text" placeholder="搜一句话…" autocomplete="off" spellcheck="false" />
+      </label>
+      <div class="chips" id="chips">
+        <button class="chip on" data-f="all" type="button">全部</button>
+        <button class="chip" data-f="user" type="button">我说</button>
+        <button class="chip" data-f="assistant" type="button">她说</button>
+      </div>
+    </div>
+
+    <main id="list"></main>
+    <button id="jump" type="button">↓ 新消息</button>
+
+    <footer>
+      <span><i class="dot"></i><span id="foot">自动保存</span></span>
+      <span>拖动标题栏移动 · 右下角可调大小</span>
+    </footer>
+  </div>
+  <script src="errlog.js"></script>
+<script src="chatlog.js"></script>
+</body>
+
+</html>
+

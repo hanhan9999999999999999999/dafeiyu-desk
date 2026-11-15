@@ -1,0 +1,18 @@
+{
+	"Type": "Live2D Expression",
+	"IsModelCustomizationExpression": false,
+	"FadeInTime": 0.3,
+	"FadeOutTime": 0.35,
+	"Parameters": [
+		{
+			"Id": "Movement1",
+			"Value": 0.0,
+			"Blend": "Add"
+		},
+		{
+			"Id": "Movement3",
+			"Value": 1.0,
+			"Blend": "Add"
+		}
+	]
+}

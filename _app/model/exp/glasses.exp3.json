@@ -1,0 +1,73 @@
+{
+	"Type": "Live2D Expression",
+	"IsModelCustomizationExpression": false,
+	"FadeInTime": 0.3,
+	"FadeOutTime": 0.35,
+	"Parameters": [
+		{
+			"Id": "key11",
+			"Value": 1.0,
+			"Blend": "Add"
+		},
+		{
+			"Id": "key1",
+			"Value": 0,
+			"Blend": "Add"
+		},
+		{
+			"Id": "key2",
+			"Value": 0,
+			"Blend": "Add"
+		},
+		{
+			"Id": "key3",
+			"Value": 0,
+			"Blend": "Add"
+		},
+		{
+			"Id": "key4",
+			"Value": 0,
+			"Blend": "Add"
+		},
+		{
+			"Id": "key5",
+			"Value": 0,
+			"Blend": "Add"
+		},
+		{
+			"Id": "key6",
+			"Value": 0,
+			"Blend": "Add"
+		},
+		{
+			"Id": "key7",
+			"Value": 0,
+			"Blend": "Add"
+		},
+		{
+			"Id": "key8",
+			"Value": 0,
+			"Blend": "Add"
+		},
+		{
+			"Id": "key9",
+			"Value": 0,
+			"Blend": "Add"
+		},
+		{
+			"Id": "key10",
+			"Value": 0,
+			"Blend": "Add"
+		},
+		{
+			"Id": "key12",
+			"Value": 0,
+			"Blend": "Add"
+		},
+		{
+			"Id": "key13",
+			"Value": 0,
+			"Blend": "Add"
+		}
+	]
+}

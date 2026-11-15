@@ -1,47 +1,94 @@
-# 依赖与产物
-node_modules/
-dist/
-runtime/
-rvc/
-tts2/
+# ---- 体积大的第三方环境，不进版本库 ----
+_app/rvc/py/
+_app/rvc/_bak_torch/
+_app/rvc/_dl/
+_app/tts2/
+_app/runtime/
+_app/node_modules/
+_app/dist/
 
-# 模型与模型资源（绝不入仓）
-model/
-models/
-*.moc3
-*.model3.json
-*.physics3.json
-*.cdi3.json
-*.exp3.json
-*.motion3.json
-*.png.bak
+# ---- 二进制 / 生成物 ----
+_app/engine/models/*.bin
+_app/engine/runtime/
+_app/model/*.moc3
+_app/model/*.psd
+**/*.onnx
+**/*.pth
+**/*.wav
+**/*.mp3
+**/*.exe
+**/*.7z
+**/*.zip
 
-# 二进制与权重
-*.onnx
-*.pth
-*.bin
-*.exe
-*.dll
-*.7z
-*.zip
-*.wav
-*.mp3
+# 打包工具例外：afterPack 用 rcedit.exe 写 exe 图标与版本信息，必须入库，
+# 否则换一台机器 clone 下来打包会失败（afterPack 找不到 rcedit）。
+!_app/tools/rcedit.exe
 
-# 运行期
-*.log
-_test/out/
-_test/tmp/
-_test/*.png
-_test/*.json
-_test/**/edge-profile*/
+# ---- 测试残留与日志 ----
+_app/_test/_*.txt
+_app/_test/_*.json
+_app/_test/*.png
+_app/_test/*.wav
+_app/_test/**/edge-profile*/
+_app/_test/**/__pycache__/
+_app/run.log
+**/run.log
+**/*.log
+**/*.bak
+**/*.bak-*
+**/*.broken
 
-# 编辑器 / 系统
-.vscode/
-.idea/
+# ---- 编辑过程中的临时副本：绝不入库，也绝不进安装包 ----
+**/*.rescued
+**/*.split-attempt
+**/*.pre-*
+**/*.orig
+**/*.rej
+
+# ---- 记忆库（工作区私有数据） ----
+.dsh-meow/
+
+# ---- 系统 ----
 Thumbs.db
 desktop.ini
 .DS_Store
 
-# ������ߣ�afterPack ��Ҫ���� exe ͼ����汾��Ϣ
-!tools/rcedit.exe
+# ---- 参考项目（只读，不参与版本控制） ----
+ref/
 
+# ---- 早期 RVC 环境残留（现在的在 _app/rvc/） ----
+_rvc/
+_rvc2/
+_build/
+_app/_bak*/
+
+# ---- 下载缓存（2.3GB 的 torch wheel 等） ----
+_dl/
+
+_app/feiyu-voice/
+
+# 误重定向出来的无名文件（PowerShell 把空变量写成 "-"）
+_app/-
+
+# 开发期归档（一次性脚本、临时产物），不进仓库
+_archive/
+
+# 截图与冒烟产物（smoke-electron.js 生成的证据图）
+_app/_shots/
+
+# 临时探针脚本
+_app/_tmp-*.js
+_app/_tmp/
+
+# ---- 1.3.0 收尾：工作素材与缓存不入库 ----
+_app/.cache-eb/
+mianfeimodelYUAN/
+_ref/
+_shots/
+_试听/
+_publish/dafeiyu-desk/
+nul
+**/*.rescued2
+
+# ---- 原始设计稿：单个 125.6 MB，超过 GitHub 100 MB 上限，不入库 ----
+DeepSeek Live2D Model/psd/
