@@ -60,6 +60,12 @@ const els = {
   diagExport: document.getElementById("diagExport"),
   diagOpenBtn: document.getElementById("diagOpenBtn"),
   diagResult: document.getElementById("diagResult"),
+  diagRunBtn: document.getElementById("diagRunBtn"),
+  diagOpenReport: document.getElementById("diagOpenReport"),
+  diagHead: document.getElementById("diagHead"),
+  diagList: document.getElementById("diagList"),
+  gameMode: document.getElementById("gameMode"),
+  gameModeHint: document.getElementById("gameModeHint"),
   micDevice: document.getElementById("micDevice"),
   voiceId: document.getElementById("voiceId"),
   voiceTry: document.getElementById("voiceTry"),
@@ -68,6 +74,8 @@ const els = {
   bridgeResult: document.getElementById("bridgeResult"),
   bridgeAddrs: document.getElementById("bridgeAddrs"),
   miniToggle: document.getElementById("miniToggle"),
+  bridgeFix: document.getElementById("bridgeFix"),
+  bridgeFixHint: document.getElementById("bridgeFixHint"),
   // RVC：八个一次加齐。els 是硬编码表，漏一个会让 paint() 抛出去、
   // 整个面板的按钮全部失效——这个坑踩过一次，不再踩。
   voiceOutSeg: document.getElementById("voiceOutSeg"),
@@ -100,6 +108,22 @@ const els = {
   feiyuEngineCheck: document.getElementById("feiyuEngineCheck"),
   feiyuEngineCheck: document.getElementById("feiyuEngineCheck"),
   feiyuInstall: document.getElementById("feiyuInstall"),
+  // 引擎状态卡（①）：状态点 / 标题 / 徽章 / 四个事实 / 启停 / 待机 / 目录校验
+  engDot: document.getElementById("engDot"),
+  engName: document.getElementById("engName"),
+  engTag: document.getElementById("engTag"),
+  engFactEngine: document.getElementById("engFactEngine"),
+  engFactDevice: document.getElementById("engFactDevice"),
+  engFactIdle: document.getElementById("engFactIdle"),
+  engFactHome: document.getElementById("engFactHome"),
+  engFallbackNote: document.getElementById("engFallbackNote"),
+  engFeiyuRows: document.getElementById("engFeiyuRows"),
+  feiyuEngineStart: document.getElementById("feiyuEngineStart"),
+  feiyuEngineStop: document.getElementById("feiyuEngineStop"),
+  feiyuHomeCheck: document.getElementById("feiyuHomeCheck"),
+  feiyuIdleAuto: document.getElementById("feiyuIdleAuto"),
+  feiyuIdleMin: document.getElementById("feiyuIdleMin"),
+  feiyuIdleHint: document.getElementById("feiyuIdleHint"),
   rvcBox: document.getElementById("rvcBox"),
   rvcPython: document.getElementById("rvcPython"),
   rvcModel: document.getElementById("rvcModel"),
@@ -134,6 +158,18 @@ const els = {
   seeSpeak: document.getElementById("seeSpeak"),
   voiceWarm: document.getElementById("voiceWarm"),
   mute: document.getElementById("mute"),
+  // 闲置词：两个开关 + 预合成缓存的那一套控件
+  idleSpeak: document.getElementById("idleSpeak"),
+  idleBubble: document.getElementById("idleBubble"),
+  idleLineCount: document.getElementById("idleLineCount"),
+  idleCacheInfo: document.getElementById("idleCacheInfo"),
+  idleCacheBuild: document.getElementById("idleCacheBuild"),
+  idleCacheCancel: document.getElementById("idleCacheCancel"),
+  idleCacheClear: document.getElementById("idleCacheClear"),
+  idleCacheOpen: document.getElementById("idleCacheOpen"),
+  idleCacheBar: document.getElementById("idleCacheBar"),
+  idleCacheHint: document.getElementById("idleCacheHint"),
+  idleCacheAuto: document.getElementById("idleCacheAuto"),
   seeTest: document.getElementById("seeTest"),
   seeResult: document.getElementById("seeResult"),
 };
@@ -480,6 +516,13 @@ function paint(s) {
     els.mute.classList.toggle("on", s.mute === true);
     els.mute.setAttribute("aria-checked", s.mute === true ? "true" : "false");
   }
+  // 闲置词的两个开关：默认都是开（说 + 冒），只有显式 false 才算关。
+  for (const [key, el] of [["idleSpeak", els.idleSpeak], ["idleBubble", els.idleBubble], ["idleCacheAuto", els.idleCacheAuto]]) {
+    if (!el) continue;
+    const on = s[key] !== false;
+    el.classList.toggle("on", on);
+    el.setAttribute("aria-checked", on ? "true" : "false");
+  }
   // 看屏幕：默认程序自带（不填接口），只有填了地址才算「外部接口」
   if (els.seeModeSeg) {
     // 手点了「外部接口」但还没填地址时，不能被一次普通重绘把输入框收回去
@@ -529,6 +572,18 @@ function paint(s) {
   if (els.rvcBox) els.rvcBox.classList.toggle("hidden", (s.voiceOut || "tts") !== "rvc");
   if (els.xttsBox) els.xttsBox.classList.toggle("hidden", (s.voiceOut || "tts") !== "xtts");
   if (els.feiyuBox) els.feiyuBox.classList.toggle("hidden", (s.voiceOut || "tts") !== "feiyu");
+  // 状态卡里飞鱼专有的那几行（目录/安装/待机/预热）只在选飞鱼时露出来；
+  // 选 TTS 时它们没有意义，露着只会让人以为必须配。
+  if (els.engFeiyuRows) els.engFeiyuRows.classList.toggle("hidden", (s.voiceOut || "tts") !== "feiyu");
+  if (els.feiyuIdleAuto) {
+    const idleOn = s.feiyuIdleAuto !== false;
+    els.feiyuIdleAuto.classList.toggle("on", idleOn);
+    els.feiyuIdleAuto.setAttribute("aria-checked", idleOn ? "true" : "false");
+  }
+  if (els.feiyuIdleMin && document.activeElement !== els.feiyuIdleMin) {
+    const m = Number(s.feiyuIdleMin);
+    els.feiyuIdleMin.value = s.feiyuIdleAuto === false ? "" : String(Number.isFinite(m) && m > 0 ? m : 10);
+  }
   // 面板一打开就把引擎状态拉一次（startFeiyuPoll 是幂等的，重复调只起一个定时器）。
   try { startFeiyuPoll(); } catch (e) { }
   // 选飞鱼但人在「听与说」页时，告诉他声线在隔壁页 —— 主人问过「飞鱼的模型选择怎么丢了」。
@@ -565,11 +620,12 @@ function paint(s) {
   if (els.feiyuRefSel) els.feiyuRefSel.value = s.feiyuRef || "";
   // 状态行别老是「未启用」——选了她就是启用状态，只有真跑过一轮才有引擎耗时。
   // 试听写过结果（带「引擎」前缀）就别覆盖，那是更具体的信息。
-  if (els.feiyuState && !/^引擎|^✗|^合成中/.test(els.feiyuState.textContent || "")) {
-    els.feiyuState.className = "hint";
-    els.feiyuState.textContent = s.voiceOut === "feiyu"
-      ? "已启用 · 参考" + (s.feiyuRef ? s.feiyuRef : "自动挑选")
-      : "未启用（上面「语音输出」选「飞鱼」才会用）";
+  // 状态那一行（#feiyuState）现在归状态卡管：它要按「没装齐 / 未启动 / 装载中 / 就绪」
+  // 四种情况说不同的话，还要带「回落 TTS」的实情，所以 paint() 不再覆盖它，
+  // 只在还没被状态卡写过时给一句初始文案。
+  if (els.feiyuState && !String(els.feiyuState.textContent || "").trim()) {
+    els.feiyuState.className = "notice";
+    els.feiyuState.textContent = "正在读取引擎状态…";
   }
   if (els.xttsRef) els.xttsRef.value = s.xttsRef || "";
   if (els.xttsSpeed) els.xttsSpeed.value = String(s.xttsSpeed == null ? 1 : s.xttsSpeed);
@@ -599,9 +655,7 @@ function paint(s) {
       b.classList.toggle("on", Number(b.dataset.v) === on);
     }
   }
-  for (const key of ["sharpen", "alwaysOnTop", "clickThrough", "followCursor", "autoIdle", "blinkEnabled", "launchAtLogin", "dockAutoHide"]) {
-    // 判空：少一个元素只跳过它，不能让 paint() 抛出去——
-    // 这里一抛，后面所有按钮的 addEventListener 都不会执行，整个面板就「点了没反应」。
+  for (const key of ["sharpen", "alwaysOnTop", "clickThrough", "followCursor", "autoIdle", "blinkEnabled", "launchAtLogin", "dockAutoHide"]) {    // 判空：少一个元素只跳过它，不能让 paint() 抛出去——    // 这里一抛，后面所有按钮的 addEventListener 都不会执行，整个面板就「点了没反应」。
     const el = els[key];
     if (el) {
       const on = s[key] === true;
@@ -1204,34 +1258,287 @@ if (els.xttsTry) {
 // 原来这里有一对「可爱/温柔」按钮。2026-11-08 主人说这两个选项没必要——
 // 参考音频本身就是音色，用户塞哪个就用哪个，所以按钮组删了，改成上面那个下拉 + 文件夹。
 
-// 引擎活没活。主人问过「怎么选了飞鱼还是 TTS 的声音」，根子就在这儿：
-// 环境装好 ≠ 引擎在跑。三个层次分开说，别让人猜。
-//   available=false  → 目录/venv/声库缺东西，先点「一键安装」
-//   available=true 且 ready=false → 装好了但引擎进程没起来，切到飞鱼说一句就会拉起来
-//   ready=true       → 引擎在跑，模型也在显存里
-async function checkFeiyuEngine() {
+// ── 引擎状态卡（①）──────────────────────────────────────
+// 主人问过两次「怎么选了飞鱼还是 TTS 的声音」——根子是「环境装好 ≠ 引擎在跑」。
+// 这张卡把四个层次分开说，并且给出启停按钮、目录校验、待机时长：
+//   available=false        → 环境缺东西，先一键安装（此时说话会回落 TTS，得说出来）
+//   available && !running  → 装好了但进程没起
+//   running && !ready      → 进程起了，模型还在进显存（约 25 秒）
+//   ready                  → 随时能开口
+function engDotCls(kind) {
+  if (els.engDot) els.engDot.className = "eng-dot" + (kind ? " " + kind : "");
+}
+function engTitle(name, tag, tagCls) {
+  if (els.engName) els.engName.textContent = name || "—";
+  if (els.engTag) {
+    els.engTag.className = "tag" + (tagCls ? " " + tagCls : "");
+    els.engTag.textContent = tag || "—";
+  }
+}
+function engSub(text, cls) {
   const el = els.feiyuEngineState;
   if (!el) return;
+  el.className = "eng-sub" + (cls ? " " + cls : "");
+  el.textContent = text;
+}
+function engFact(el, text, title) {
+  if (!el) return;
+  const t = text == null || text === "" ? "—" : String(text);
+  el.textContent = t;
+  el.title = title || t;
+}
+function engNotice(text, cls) {
+  const el = els.feiyuState;
+  if (!el) return;
+  el.className = "notice" + (cls ? " " + cls : "");
+  el.textContent = text;
+}
+// 待机：把服务端的毫秒换成「还有几分钟释放」，比一串数字好读
+function fmtIdle(idle) {
+  if (!idle) return "—";
+  const min = Number(idle.ms) > 0 ? Math.round(Number(idle.ms) / 60000) : 0;
+  if (!min) return "常驻，不释放";
+  if (idle.nextAt) {
+    const left = Math.round((Number(idle.nextAt) - Date.now()) / 60000);
+    return left > 0 ? "约 " + left + " 分钟后释放" : "即将释放";
+  }
+  return "闲置 " + min + " 分钟后释放";
+}
+// 把服务端的待机设置同步回输入框。正在打字时不覆盖，免得抢用户的手。
+function syncIdleInputs(idle) {
+  if (!idle) return;
+  const min = Number(idle.ms) > 0 ? Math.round(Number(idle.ms) / 60000) : 0;
+  const auto = !!idle.auto;
+  if (els.feiyuIdleAuto) {
+    els.feiyuIdleAuto.classList.toggle("on", auto);
+    els.feiyuIdleAuto.setAttribute("aria-checked", auto ? "true" : "false");
+  }
+  if (els.feiyuIdleMin) {
+    els.feiyuIdleMin.disabled = !auto;
+    els.feiyuIdleMin.style.opacity = auto ? "" : ".45";
+    if (document.activeElement !== els.feiyuIdleMin) {
+      els.feiyuIdleMin.value = auto ? String(min || 10) : "";
+      els.feiyuIdleMin.placeholder = auto ? String(min || 10) : "已关";
+    }
+  }
+  if (els.feiyuIdleHint) {
+    els.feiyuIdleHint.className = "hint";
+    els.feiyuIdleHint.textContent = auto
+      ? "现在：闲置 " + (min || 10) + " 分钟没说话就释放显存；下次开口会自动重新装载（约 25 秒）。"
+      : "现在：常驻 —— 不自动释放，一直占着 8GB 左右显存。";
+  }
+}
+
+async function checkFeiyuEngine() {
+  const v = (cur && cur.voiceOut) || "tts";
+
+  // 不是飞鱼：这张卡换成「现在是谁在出声」，飞鱼那几行收起来。
+  if (v !== "feiyu") {
+    const label = v === "rvc" ? "RVC 换音色" : v === "xtts" ? "XTTS 克隆" : "内置 TTS";
+    engDotCls("ok");
+    engTitle(label, "在用", "ok");
+    engSub(v === "tts"
+      ? "内置引擎直接出声：不用启动、不占显存、也不会回落。"
+      : label + " 的启动和状态在下面「引擎参数」里。");
+    engFact(els.engFactEngine, label);
+    engFact(els.engFactDevice, v === "tts" ? "本机 CPU" : "见下方参数");
+    engFact(els.engFactIdle, v === "tts" ? "不占显存" : "见下方参数");
+    engFact(els.engFactHome, v === "tts" ? "随程序内置" : "见下方参数");
+    engNotice(v === "tts"
+      ? "TTS 是保底那一级：任何引擎出问题，最后都由它出声，所以不会没声音。"
+      : "这两个引擎自己也有启动/安装按钮，在下面「引擎参数」里。", "ok");
+    if (els.engFallbackNote) {
+      els.engFallbackNote.className = "hint";
+      els.engFallbackNote.textContent = "引擎没起来时不会让你听不到声音：会自动回落内置 TTS，并且当场说明是哪个环节出的问题。";
+    }
+    return;
+  }
+
   try {
     const r = await fetch("/engine/feiyu_status", { cache: "no-store" });
     const j = await r.json();
+    const miss = Array.isArray(j && j.missing) ? j.missing : [];
+    const idle = (j && j.idle) || {};
+    const home = (j && j.home) || "";
+    const st = () => (els.feiyuEngineState ? els.feiyuEngineState.textContent : "");
+
+    engFact(els.engFactEngine, "飞鱼（CosyVoice3）");
+    engFact(els.engFactDevice, j && j.device ? j.device : (j && j.ready ? "已加载" : "未加载"));
+    engFact(els.engFactIdle, fmtIdle(idle));
+    engFact(els.engFactHome, home || "自动", home);
+    syncIdleInputs(idle);
+
     if (!j || j.ok === false || j.available === false) {
-      el.className = "hint bad";
-      el.textContent = "✗ 没装好，装完才有引擎" + (j && j.error ? "（" + String(j.error).slice(0, 60) + "）" : "");
+      engDotCls("bad");
+      engTitle("飞鱼", "没装齐", "bad");
+      engSub("环境不全"
+        + (miss.length ? "：缺 " + miss.map((m) => m.label).join("、") : (j && j.error ? "（" + String(j.error).slice(0, 70) + "）" : ""))
+        + "。点下面的「一键安装」，或者换个引擎目录再校验。");
+      engNotice("现在说不了飞鱼的声音 —— 每句话都会回落内置 TTS，不会静音。装好了再把开关打到飞鱼。", "bad");
+      if (els.engFallbackNote) {
+        els.engFallbackNote.className = "hint warn";
+        els.engFallbackNote.textContent = "回落链：飞鱼（本机没装齐）→ 内置 TTS。她开口时会明确告诉你「这次是 TTS 在说」。";
+      }
       return;
     }
+
+    if (!j.running) {
+      engDotCls("");
+      engTitle("飞鱼", "未启动", "");
+      engSub("装好了，但引擎没在跑。点「一键启动」提前装进显存（约 25 秒）；直接说一句也会自动拉起。");
+      engNotice("引擎没开：第一句话要等装载。装载失败会自动回落 TTS，并把原因写在下面。", "warn");
+      if (els.engFallbackNote) {
+        els.engFallbackNote.className = "hint";
+        els.engFallbackNote.textContent = "现在没热着 —— 声音还是飞鱼的，只是第一句要多等二十几秒。";
+      }
+      return;
+    }
+
     if (!j.ready) {
-      el.className = "hint";
-      el.textContent = "装好了，但引擎没启动 · 切到飞鱼说一句会自动拉起来（第一句约 20 秒）";
+      engDotCls("busy");
+      engTitle("飞鱼", "装载中", "busy");
+      engSub("引擎进程起来了，模型正在进显存" + (j.device ? "（" + j.device + "）" : "") + "，约 25 秒。就绪之前的请求会自动等它，不会说话说一半。");
+      engNotice("装载中：这会儿说话会慢，但不会静音，也不会换声音。", "warn");
       return;
     }
-    el.className = "hint ok";
-    el.textContent = "● 引擎已启动" + (j.device ? " · " + j.device : "") + (j.style ? " · " + j.style : "");
+
+    engDotCls("ok");
+    engTitle("飞鱼", "就绪", "ok");
+    engSub("引擎在跑" + (j.device ? " · " + j.device : "") + (j.style ? " · " + j.style : "")
+      + "，随时能开口。闲置不动会按下面的时长释放显存。");
+    engNotice("引擎就绪：这几句就是飞鱼本人的声音。", "ok");
+    if (els.engFallbackNote) {
+      els.engFallbackNote.className = "hint";
+      els.engFallbackNote.textContent = "回落链：飞鱼 → 内置 TTS。哪一级出问题都会在这里和她的气泡里说清楚，不会悄悄换声音。";
+    }
+    if (j.lastError && !st().includes(String(j.lastError).slice(0, 12))) {
+      // 上一次失败过就补一句，别让「现在就绪」把刚才的错盖掉
+      engSub(st() + " 上次出错：" + String(j.lastError).slice(0, 80));
+    }
   } catch (e) {
-    el.className = "hint bad";
-    el.textContent = "✗ 查不到引擎状态（本地服务没起来？）";
+    engDotCls("bad");
+    engTitle("飞鱼", "查不到", "bad");
+    engSub("连本地引擎服务都没问到（HTTP 服务没起来？）—— 说话会自动回落 TTS。");
+    engNotice("查不到引擎状态：" + (e && e.message || e), "bad");
   }
 }
+
+// 请求本地引擎的几个动作。都回 JSON，出错也回 200，所以看 ok 字段不看 HTTP 码。
+async function postEngine(path, body) {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body || {}),
+    cache: "no-store",
+  });
+  let j = null;
+  try { j = await r.json(); } catch (e) { j = { ok: false, error: "HTTP " + r.status + " 没有 JSON" }; }
+  return j || { ok: false, error: "空响应" };
+}
+
+// 一键启动：把模型提前装进显存
+if (els.feiyuEngineStart) {
+  els.feiyuEngineStart.addEventListener("click", async () => {
+    const btn = els.feiyuEngineStart;
+    if (btn.disabled) return;
+    btn.disabled = true;
+    engSub("正在把模型装进显存…（第一次约 25 秒，别关窗口）", "busy");
+    engDotCls("busy");
+    engTitle("飞鱼", "装载中", "busy");
+    try {
+      const j = await postEngine("/engine/feiyu_start", { refDir: (cur && cur.feiyuRefDir) || "" });
+      if (!j || j.ok === false) throw new Error((j && (j.error || j.hint)) || "启动失败");
+      await checkFeiyuEngine();
+    } catch (e) {
+      engDotCls("bad");
+      engTitle("飞鱼", "启动失败", "bad");
+      engSub("没起来：" + (e && e.message || e));
+      engNotice("启动失败 —— 说话会自动回落 TTS，不会静音。" + (e && e.message ? "（" + e.message + "）" : ""), "bad");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+// 关闭引擎：立刻把显存放掉（下次开口自动重新装载）
+if (els.feiyuEngineStop) {
+  els.feiyuEngineStop.addEventListener("click", async () => {
+    const btn = els.feiyuEngineStop;
+    if (btn.disabled) return;
+    btn.disabled = true;
+    try {
+      const j = await postEngine("/engine/feiyu_stop", {});
+      if (!j || j.ok === false) throw new Error((j && j.error) || "关闭失败");
+      await checkFeiyuEngine();
+    } catch (e) {
+      engNotice("关闭失败：" + (e && e.message || e), "bad");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+// 目录校验：逐项看 venv / 服务脚本 / 声库 / cosyvoice 在不在
+if (els.feiyuHomeCheck) {
+  els.feiyuHomeCheck.addEventListener("click", async () => {
+    const dir = els.feiyuHome ? els.feiyuHome.value.trim() : "";
+    if (els.feiyuHomeInfo) {
+      els.feiyuHomeInfo.className = "hint";
+      els.feiyuHomeInfo.textContent = "正在检查" + (dir ? " " + dir : "自动找到的目录") + "…";
+    }
+    try {
+      const j = await postEngine("/engine/feiyu_home_check", { dir });
+      const miss = Array.isArray(j && j.missing) ? j.missing : [];
+      if (!els.feiyuHomeInfo) return;
+      if (j && j.ok && miss.length === 0) {
+        els.feiyuHomeInfo.className = "hint ok";
+        els.feiyuHomeInfo.textContent = "✓ 这个目录可以用：" + (j.resolved || dir);
+      } else {
+        els.feiyuHomeInfo.className = "hint bad";
+        els.feiyuHomeInfo.textContent = "✗ " + (j && (j.note || j.error) || "检查失败")
+          + (miss.length ? "：缺 " + miss.map((m) => m.label).join("、") : "")
+          + "（目录：" + ((j && j.resolved) || dir || "自动") + "）";
+      }
+    } catch (e) {
+      if (els.feiyuHomeInfo) {
+        els.feiyuHomeInfo.className = "hint bad";
+        els.feiyuHomeInfo.textContent = "✗ 检查失败：" + (e && e.message || e);
+      }
+    }
+  });
+}
+
+// 待机自动关闭：开关 + 分钟数。改完立刻推给引擎，不用等重启。
+if (els.feiyuIdleAuto) {
+  const flipIdle = async () => {
+    const on = !els.feiyuIdleAuto.classList.contains("on");
+    els.feiyuIdleAuto.classList.toggle("on", on);
+    els.feiyuIdleAuto.setAttribute("aria-checked", on ? "true" : "false");
+    const minutes = Math.min(720, Math.max(1, Math.round(Number(els.feiyuIdleMin && els.feiyuIdleMin.value) || 10)));
+    try { push({ feiyuIdleAuto: on, feiyuIdleMin: minutes }); } catch (e) { }
+    try { await postEngine("/engine/feiyu_idle", { auto: on, minutes }); } catch (e) { }
+    syncIdleInputs({ ms: on ? minutes * 60000 : 0, auto: on });
+    checkFeiyuEngine();
+  };
+  els.feiyuIdleAuto.addEventListener("click", flipIdle);
+  els.feiyuIdleAuto.addEventListener("keydown", (e) => {
+    if (e.key === " " || e.key === "Enter") { e.preventDefault(); flipIdle(); }
+  });
+}
+if (els.feiyuIdleMin) {
+  const commitIdle = async () => {
+    const n = Math.min(720, Math.max(1, Math.round(Number(els.feiyuIdleMin.value) || 10)));
+    els.feiyuIdleMin.value = String(n);
+    try { push({ feiyuIdleMin: n }); } catch (e) { }
+    try { await postEngine("/engine/feiyu_idle", { minutes: n, auto: !els.feiyuIdleAuto || els.feiyuIdleAuto.classList.contains("on") }); } catch (e) { }
+    checkFeiyuEngine();
+  };
+  els.feiyuIdleMin.addEventListener("change", commitIdle);
+  els.feiyuIdleMin.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); els.feiyuIdleMin.blur(); commitIdle(); }
+  });
+}
+
 if (els.feiyuEngineCheck) {
   els.feiyuEngineCheck.addEventListener("click", () => checkFeiyuEngine());
 }
@@ -1250,11 +1557,12 @@ function startFeiyuPoll() {
   }, 3000);
 }
 
+
 if (els.feiyuTry) {
   els.feiyuTry.addEventListener("click", async () => {
     if (els.feiyuState) {
-      els.feiyuState.className = "hint";
-      els.feiyuState.textContent = "合成中…（第一次要加载模型，约 20 秒）";
+      els.feiyuState.className = "notice";
+      els.feiyuState.textContent = "合成中…（第一次要加载模型，约 20～25 秒）";
     }
     try {
       const r = await fetch("/engine/tts", {
@@ -1264,17 +1572,26 @@ if (els.feiyuTry) {
       });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || "合成失败");
+      // 试听最怕「听起来不对，但不知道是不是我自己的问题」：
+      // 服务端把回落原因一起回传（fellBack），这里原样说出来。
       if (els.feiyuState) {
-        els.feiyuState.className = "hint";
-        els.feiyuState.textContent = "引擎 " + (j.engine || "?") + " · " + (j.dur || "?") + "s"
-          + (j.cached ? " · 缓存" : "");
+        if (j.fellBack) {
+          els.feiyuState.className = "notice warn";
+          els.feiyuState.textContent = "这次不是飞鱼：上面选的引擎没起来（" + (j.fellBack.reason || "原因未知")
+            + "），这一段其实是 " + (j.engine || "TTS") + " 念的。修好之后再试。";
+        } else {
+          els.feiyuState.className = "notice ok";
+          els.feiyuState.textContent = "引擎 " + (j.engine || "?") + " · " + (j.dur || "?") + "s"
+            + (j.cached ? " · 走缓存" : "") + " —— 这就是你现在听到的声音。";
+        }
       }
       const a = new Audio(j.url);
       a.play().catch(() => {});
+      checkFeiyuEngine();
     } catch (e) {
       if (els.feiyuState) {
-        els.feiyuState.className = "hint bad";
-        els.feiyuState.textContent = "✗ " + (e && e.message || e);
+        els.feiyuState.className = "notice bad";
+        els.feiyuState.textContent = "✗ 合成失败：" + (e && e.message || e) + "（真说话时会自动回落 TTS）";
       }
     }
   });
@@ -1521,7 +1838,7 @@ els.fpsSeg.addEventListener("click", (e) => {
 // 点下去先本地翻一次、立刻重画，再发请求。push 是异步的（拿到主进程返回才 paint），
 // 等它回来才更新 cur 的话，手快连点第二下会用旧值算出同一个目标 —— 表现是「这个开关关不掉」，
 // 偏偏点了有反馈（请求真的发出去了），最难查。写盘失败时 push 会重新拉一次设置把界面纠正回来。
-for (const key of ["sharpen", "alwaysOnTop", "clickThrough", "followCursor", "autoIdle", "blinkEnabled", "launchAtLogin", "dockAutoHide", "mute"]) {
+for (const key of ["sharpen", "alwaysOnTop", "clickThrough", "followCursor", "autoIdle", "blinkEnabled", "launchAtLogin", "dockAutoHide", "mute", "idleSpeak", "idleBubble", "idleCacheAuto"]) {
   const el = els[key];
   if (!el) continue;
   el.addEventListener("click", () => {
@@ -1532,6 +1849,47 @@ for (const key of ["sharpen", "alwaysOnTop", "clickThrough", "followCursor", "au
     push({ [key]: next });
   });
 }
+// ---- 游戏模式 ----
+// 它不是一条普通设置：主进程要藏窗口、停渲染、把语音模型的显存还回去。所以走专用 IPC，
+// 界面按主进程回来的真实状态落地（这个开关可能被托盘或唤出热键在别处改掉）。
+function gameHint(on) {
+  if (!els.gameModeHint) return;
+  els.gameModeHint.className = "notice" + (on ? " warn" : "");
+  els.gameModeHint.textContent = on
+    ? "已经在游戏模式里：她不画、不轮询屏幕，语音模型的显存也放掉了。托盘里点「退出游戏模式」，或者按一次唤出热键，她就回来。"
+    : "现在不在游戏模式。";
+}
+
+if (els.gameMode) {
+  els.gameMode.addEventListener("click", async () => {
+    const next = els.gameMode.getAttribute("aria-checked") !== "true";
+    els.gameMode.classList.toggle("on", next);
+    els.gameMode.setAttribute("aria-checked", next ? "true" : "false");
+    gameHint(next);
+    let real = next;
+    try {
+      const r = await api.gameSet(next);
+      if (!r || !r.ok) real = !next;
+      else real = !!r.on;
+    } catch (e) {
+      real = !next;
+    }
+    cur.gameMode = real;
+    els.gameMode.classList.toggle("on", real);
+    els.gameMode.setAttribute("aria-checked", real ? "true" : "false");
+    gameHint(real);
+  });
+  // 进来时按当前状态先摆一次（主进程里可能已经是游戏模式）
+  api.gameStatus?.().then((r) => {
+    if (r && r.ok) {
+      cur.gameMode = !!r.on;
+      els.gameMode.classList.toggle("on", !!r.on);
+      els.gameMode.setAttribute("aria-checked", r.on ? "true" : "false");
+      gameHint(!!r.on);
+    }
+  }).catch(() => { });
+}
+
 // 开关视觉上是滑块，语义上是 switch：Tab 能停、Enter/空格能拨。
 for (const el of document.querySelectorAll(".sw")) {
   if (!el.getAttribute("aria-label")) {
@@ -1722,6 +2080,67 @@ function paintMini(s) {
 async function refreshMini() {
   try { paintMini(await api.miniStatus()); } catch (e) { paintMini(null); }
 }
+
+/* ── 一键自检并修复 ────────────────────────────────────
+ * bridgeEnsure 在主进程里做三件事：先探用户填的地址 → 不通就起随身桥接 →
+ * 把地址指过去（只在当前是本机地址时才改，远端不动）。
+ * 这里只负责把它的结论翻成人话，别让用户猜「到底通了没有」。
+ */
+function paintBridgeFix(r) {
+  if (!els.bridgeFixHint) return;
+  if (!r) {
+    els.bridgeFixHint.className = "notice bad";
+    els.bridgeFixHint.textContent = "自检没跑起来（主进程没回应）。";
+    return;
+  }
+  const where = r.base ? ' · <b>' + esc(r.base) + "</b>" : "";
+  if (r.ok && r.external) {
+    els.bridgeFixHint.className = "notice ok";
+    els.bridgeFixHint.innerHTML = "✓ 你填的桥接是通的" + where + (r.note ? '<br><span class="meta">' + esc(r.note) + "</span>" : "");
+  } else if (r.ok && r.mini) {
+    els.bridgeFixHint.className = "notice ok";
+    els.bridgeFixHint.innerHTML =
+      "✓ 随身桥接已经在跑" + where +
+      "<br><span class=\"meta\">" + (r.switched ? "地址栏已经指过来了。" : "") +
+      "这台机器没装 phone-bridge 也能用 —— 它直接连本机 DSH。</span>";
+  } else {
+    els.bridgeFixHint.className = "notice warn";
+    els.bridgeFixHint.innerHTML =
+      "没连上" + where + "<br><span class=\"meta\">" +
+      esc(r.note || r.error || "本机 DSH 可能没在运行。DSH 起来之后它会每 90 秒自己再试一次，不用你管。") +
+      "</span>";
+  }
+  // 主进程可能已经把地址改了，这里同步一下输入框与语音层
+  if (r.base) {
+    const cur = els.bridgeUrl ? String(els.bridgeUrl.value || "").trim() : "";
+    if (r.switched && els.bridgeUrl) els.bridgeUrl.value = r.base;
+    else if (!cur && els.bridgeUrl) els.bridgeUrl.value = r.base;
+    if (window.FishVoice && window.FishVoice.setBridgeUrl) window.FishVoice.setBridgeUrl(r.base);
+  }
+}
+
+async function runBridgeFix(auto) {
+  if (!api.bridgeEnsure) { paintBridgeFix(null); return; }
+  if (els.bridgeFix) {
+    els.bridgeFix.disabled = true;
+    if (!auto) els.bridgeFix.textContent = "检查中…";
+  }
+  let r = null;
+  try { r = await api.bridgeEnsure({}); } catch (e) { r = { ok: false, error: e && e.message ? e.message : String(e) }; }
+  if (els.bridgeFix) {
+    els.bridgeFix.disabled = false;
+    els.bridgeFix.textContent = "自检并修复";
+  }
+  paintBridgeFix(r);
+  // 修完顺手刷一下「自带桥接」那块的运行状态，两处别打架
+  refreshMini();
+}
+
+if (els.bridgeFix) {
+  els.bridgeFix.addEventListener("click", () => { runBridgeFix(false); });
+}
+// 打开设置就静默自检一次：多数人不需要点这个按钮，他们只需要「能说话」。
+setTimeout(() => { runBridgeFix(true); }, 900);
 
 if (els.miniToggle) {
   els.miniToggle.addEventListener("click", async () => {
@@ -2172,6 +2591,123 @@ if (els.logOpen) {
 
 let lastDiagDir = "";
 
+// ── 一键体检（1.5.0）───────────────────────────────────────────────
+// 结果按「坏了 → 注意 → 正常 → 跳过」排序：打开就看见该看的那几行，
+// 正常的那十几行沉在下面当背景，不用一条条读。
+const DIAG_ORDER = { bad: 0, warn: 1, ok: 2, skip: 3 };
+const DIAG_ICON = { ok: "✓", warn: "!", bad: "×", skip: "·" };
+
+function diagPaintHead(r) {
+  if (!els.diagHead) return;
+  const s = r.summary || {};
+  const parts = [];
+  if (s.ok) parts.push("好 " + s.ok);
+  if (s.warn) parts.push("注意 " + s.warn);
+  if (s.bad) parts.push("坏 " + s.bad);
+  if (s.skip) parts.push("跳过 " + s.skip);
+  els.diagHead.className = "notice " + (r.score === "bad" ? "bad" : (r.score === "warn" ? "warn" : "ok"));
+  els.diagHead.textContent = (r.head || "") + "（" + parts.join(" · ") + "）" + (r.path ? " · 报告已存好" : "");
+}
+
+function diagRow(it, extraCls) {
+  const row = document.createElement("div");
+  row.className = "diag-item " + (it.status || "ok") + (extraCls ? " " + extraCls : "");
+  const dot = document.createElement("span");
+  dot.className = "d";
+  const t = document.createElement("div");
+  t.className = "t";
+  const b = document.createElement("b");
+  b.textContent = (DIAG_ICON[it.status] || "·") + " " + (it.label || "");
+  const i = document.createElement("i");
+  i.textContent = it.detail || "";
+  t.append(b, i);
+  if (it.hint) {
+    const em = document.createElement("em");
+    em.textContent = it.hint;
+    t.append(em);
+  }
+  row.append(dot, t);
+  return row;
+}
+
+function diagPaintList(items) {
+  if (!els.diagList) return;
+  els.diagList.innerHTML = "";
+  const sorted = (items || []).slice().sort(
+    (a, b) => (DIAG_ORDER[a.status] ?? 9) - (DIAG_ORDER[b.status] ?? 9)
+  );
+  // 默认只铺「要看的」那几行（坏了 + 注意），正常的收起来 —— 体检报告最怕一次糊 14 行，
+  // 用户扫两眼就关了。全绿的时候反而全铺，那是好消息，值得看见。
+  const core = sorted.filter((x) => x.status === "bad" || x.status === "warn");
+  const rest = sorted.filter((x) => x.status !== "bad" && x.status !== "warn");
+  const first = core.length ? core : sorted;
+  for (const it of first) els.diagList.append(diagRow(it));
+  if (core.length && rest.length) {
+    let open = false;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "diag-more";
+    btn.textContent = "展开全部 " + sorted.length + " 项";
+    btn.addEventListener("click", () => {
+      open = !open;
+      els.diagList.querySelectorAll(".diag-item.extra").forEach((n) => n.remove());
+      if (open) {
+        for (const it of rest) els.diagList.append(diagRow(it, "extra"));
+        btn.textContent = "收起";
+      } else {
+        btn.textContent = "展开全部 " + sorted.length + " 项";
+      }
+    });
+    els.diagList.append(btn);
+  }
+}
+
+if (els.diagRunBtn) {
+  els.diagRunBtn.addEventListener("click", async () => {
+    els.diagRunBtn.disabled = true;
+    if (els.diagHead) {
+      els.diagHead.className = "notice";
+      els.diagHead.textContent = "正在逐项检查…（会真的去连一次桥、列一次音色，不是假装）";
+    }
+    try {
+      const r = await api.diagRun();
+      if (!r || !r.ok) throw new Error((r && r.error) || "没跑起来");
+      diagPaintHead(r);
+      diagPaintList(r.items);
+      if (els.diagOpenReport) els.diagOpenReport.disabled = !r.path;
+    } catch (e) {
+      if (els.diagHead) {
+        els.diagHead.className = "notice bad";
+        els.diagHead.textContent = "体检没跑完：" + (e && e.message ? e.message : e);
+      }
+    } finally {
+      els.diagRunBtn.disabled = false;
+    }
+  });
+}
+
+if (els.diagOpenReport) {
+  els.diagOpenReport.addEventListener("click", async () => {
+    const r = await api.diagOpenLatest?.();
+    if (r && r.ok === false && els.diagHead) {
+      els.diagHead.className = "notice warn";
+      els.diagHead.textContent = r.error || "打不开报告";
+    }
+  });
+}
+
+// 这一次运行里查过就先把结果摆出来，不用每次进设置都重新跑一遍
+(async () => {
+  try {
+    const r = await api.diagLast?.();
+    if (r && r.ok && r.items && r.items.length) {
+      diagPaintHead(r);
+      diagPaintList(r.items);
+      if (els.diagOpenReport) els.diagOpenReport.disabled = !r.path;
+    }
+  } catch (e) { }
+})();
+
 if (els.diagExport) {
   els.diagExport.addEventListener("click", async () => {
     els.diagExport.disabled = true;
@@ -2285,3 +2821,171 @@ function netErr(v) {
   if (/50[0-9]/.test(m)) return "对方服务出错了";
   return m || "未知原因";
 }
+
+// ── 闲置词：预合成缓存的界面部分 ───────────────────────────────
+// 这一块只管「说清楚现在什么状态」，不做任何合成决策：
+// 合成在 idle-cache.js，走哪个引擎由当前设置决定，这里只发起与展示。
+let idleBusy = false;
+let idleAutoTried = "";
+
+function fmtBytes(n) {
+  const b = Number(n) || 0;
+  if (b <= 0) return "0 B";
+  if (b < 1024 * 1024) return (b / 1024).toFixed(0) + " KB";
+  if (b < 1024 * 1024 * 1024) return (b / 1024 / 1024).toFixed(1) + " MB";
+  return (b / 1024 / 1024 / 1024).toFixed(2) + " GB";
+}
+
+function fmtWhen(ts) {
+  const t = Number(ts) || 0;
+  if (!t) return "";
+  const d = Math.max(0, Date.now() - t);
+  if (d < 60e3) return "刚刚";
+  if (d < 3600e3) return Math.round(d / 60e3) + " 分钟前";
+  if (d < 86400e3) return Math.round(d / 3600e3) + " 小时前";
+  return Math.round(d / 86400e3) + " 天前";
+}
+
+// 进度条：total 为 0 时不画（没东西可合成时留着一条空条很奇怪）。
+function idleBar(done, total, cls) {
+  const el = els.idleCacheBar;
+  if (!el) return;
+  if (!total) { el.hidden = true; el.classList.remove("done", "bad"); el.firstElementChild.style.width = "0%"; return; }
+  el.hidden = false;
+  el.classList.toggle("done", cls === "done");
+  el.classList.toggle("bad", cls === "bad");
+  const pct = Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+  el.firstElementChild.style.width = pct + "%";
+}
+
+function idlePaint(st) {
+  if (!st || !st.ok) return;
+  const t = st.target || {};
+  if (els.idleLineCount) els.idleLineCount.textContent = String(st.lines || 0);
+  const s = st.status;
+  const name = t.engine === "feiyu" ? "飞鱼"
+    : t.engine === "xtts" ? "XTTS"
+      : t.engine === "rvc" ? "RVC" : "内置 TTS";
+  const voice = t.voice ? " · " + t.voice : "";
+  idleBusy = !!(s && s.busy);
+  if (els.idleCacheBuild) {
+    els.idleCacheBuild.disabled = !t.canCache || idleBusy;
+    els.idleCacheBuild.textContent = idleBusy ? "合成中…" : (s && s.missing === 0 && s.total ? "重新检查" : "预合成");
+  }
+  if (els.idleCacheCancel) els.idleCacheCancel.hidden = !idleBusy;
+  if (els.idleCacheClear) els.idleCacheClear.disabled = idleBusy || !(s && s.files);
+  if (els.idleCacheInfo) {
+    if (!t.canCache) {
+      els.idleCacheInfo.textContent = "当前是 RVC（实时换嗓子）——这条路没有可预合成的音色，换回飞鱼 / XTTS / 内置 TTS 就能用。";
+    } else if (s) {
+      const head = name + voice + "：已缓存 " + s.cached + " / " + s.total + " 句";
+      const tail = s.files ? "（" + fmtBytes(s.bytes) + (s.at ? " · " + fmtWhen(s.at) : "") + "）" : "";
+      els.idleCacheInfo.textContent = head + tail;
+    }
+  }
+  if (els.idleCacheHint) {
+    if (s && s.missing && !idleBusy) {
+      els.idleCacheHint.className = "hint warn";
+      els.idleCacheHint.textContent = "还有 " + s.missing + " 句没合成。这些句子触发时会现合成（飞鱼第一句要 20 多秒），点「预合成」把剩下的补上。";
+    } else if (s && s.total && !s.missing) {
+      els.idleCacheHint.className = "hint";
+      els.idleCacheHint.textContent = "这套声音的 " + s.total + " 句都在本机了，触发时直接播，不占引擎。";
+    } else {
+      els.idleCacheHint.className = "hint";
+      els.idleCacheHint.textContent = "只有飞鱼、XTTS 和内置 TTS 能预合成；RVC 是实时换嗓子，合成出来的还是原声，所以不做。";
+    }
+  }
+  idleBar(s && s.cached, s && s.total, s && s.total && s.cached >= s.total ? "done" : "");
+  // 「这批缓存是给谁的」——换了音色之后最容易误会的一处。主进程算好 stale，这里只负责说出来。
+  // 自动补缓存在主进程排队（设置窗口不开也得能补），这里不再重复发起。
+  if (st.meta && st.meta.stale && els.idleCacheHint) {
+    els.idleCacheHint.className = "hint warn";
+    els.idleCacheHint.textContent = "这些缓存是给「" + st.meta.engine + " · " + st.meta.voice + "」做的，和你现在选的不一样。"
+      + "点「预合成」给现在这套补一份，旧的不会删。";
+  } else if (st.auto && s && s.missing > 0 && !idleBusy && els.idleCacheHint) {
+    els.idleCacheHint.className = "hint";
+    els.idleCacheHint.textContent = "开了「自动补」，换完引擎或音色 8 秒后它自己会补，不用管。";
+  }
+}
+
+async function refreshIdle() {
+  try {
+    const st = await api.idleStatus?.();
+    if (st) idlePaint(st);
+  } catch (e) {
+    if (els.idleCacheInfo) els.idleCacheInfo.textContent = "读不到缓存状态：" + netErr(e);
+  }
+}
+
+if (api.onIdleProgress) {
+  api.onIdleProgress((p) => {
+    if (!p) return;
+    if (p.phase === "done" || p.phase === "error") { idleBusy = false; refreshIdle(); return; }
+    idleBusy = true;
+    if (els.idleCacheBuild) { els.idleCacheBuild.disabled = true; els.idleCacheBuild.textContent = "合成中…"; }
+    if (els.idleCacheCancel) els.idleCacheCancel.hidden = false;
+    const total = p.total || 0;
+    const done = (p.cached || 0);
+    idleBar(done, total, "");
+    if (els.idleCacheInfo) {
+      els.idleCacheInfo.textContent = "正在合成：" + done + " / " + total + " 句" + (p.failed ? "（失败 " + p.failed + "）" : "");
+    }
+  });
+}
+
+if (els.idleCacheBuild) {
+  els.idleCacheBuild.addEventListener("click", async () => {
+    els.idleCacheBuild.disabled = true;
+    const r = await api.idleBuild?.();
+    if (!r || !r.ok) {
+      els.idleCacheBuild.disabled = false;
+      if (els.idleCacheHint) {
+        els.idleCacheHint.className = "hint warn";
+        els.idleCacheHint.textContent = (r && (r.error || r.err)) || "没能开始合成";
+      }
+      return;
+    }
+    idleBusy = true;
+    if (els.idleCacheCancel) els.idleCacheCancel.hidden = false;
+    if (els.idleCacheHint) {
+      els.idleCacheHint.className = "hint";
+      els.idleCacheHint.textContent = "开始补 " + (r.total || 0) + " 句（走 " + (r.target && r.target.engine) + "）。可以随时点「停下」，已经合成好的会留着。";
+    }
+    refreshIdle();
+  });
+}
+
+if (els.idleCacheCancel) {
+  els.idleCacheCancel.addEventListener("click", async () => {
+    await api.idleCancel?.();
+    idleBusy = false;
+    if (els.idleCacheCancel) els.idleCacheCancel.hidden = true;
+    refreshIdle();
+  });
+}
+
+if (els.idleCacheClear) {
+  els.idleCacheClear.addEventListener("click", async () => {
+    const r = await api.idleClear?.({});
+    if (r && r.ok) {
+      idleAutoTried = "";   // 清完允许自动补重新跑一次
+      if (els.idleCacheHint) {
+        els.idleCacheHint.className = "hint";
+        els.idleCacheHint.textContent = "清掉了 " + (r.removed || 0) + " 个文件（" + fmtBytes(r.bytes) + "）。下次触发会现合成。";
+      }
+    }
+    refreshIdle();
+  });
+}
+
+if (els.idleCacheOpen) {
+  els.idleCacheOpen.addEventListener("click", () => { api.idleOpen?.().catch(() => { }); });
+}
+
+refreshIdle();
+// 引擎/音色变了以后缓存状态就得重算：切到声音页签时刷一次，便宜也够用。
+for (const el of [els.voiceId, els.voiceOutSeg, els.feiyuRefSel, els.feiyuSpeed, els.xttsRef, els.xttsSpeed]) {
+  if (!el) continue;
+  el.addEventListener("change", () => { idleAutoTried = ""; setTimeout(refreshIdle, 400); });
+}
+

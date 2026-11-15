@@ -9,6 +9,7 @@
 const fs = require("fs");
 const path = require("path");
 const sem = require("./semantics");
+const compat = require("./compat");
 const M = require("./manifest");
 
 function readJson(file, maxBytes) {
@@ -382,25 +383,58 @@ function probe(packDir, manifest, opts) {
   }
 
   // ---- 自动匹配 ----
+  // 匹配本身交给 compat.js：那里是打分制（标准名 > 变体 > 关键词，反向词扣分），
+  // 猜错的代价比留空大，所以宁可留空也要把分数算准。这里只负责把结果收进报告。
   const ids = report.params.map((p) => p.id);
-  const lowerIds = ids.map((id) => id.toLowerCase());
-  const params = {};
-  for (const slot of sem.PARAM_SLOTS) {
-    const cands = sem.candidates(slot);
-    let hit = "";
-    for (const c of cands) {
-      const i = lowerIds.indexOf(String(c).toLowerCase());
-      if (i >= 0) { hit = ids[i]; break; }
+  const names = report.expressions.map((e) => e.name);
+  let cmp = null;
+  try {
+    cmp = compat.resolve({ paramIds: ids, exprNames: names });
+  } catch (e) {
+    report.warnings.push("参数兼容层出错，退回关键词匹配：" + e.message);
+  }
+  if (cmp) {
+    report.compat = {
+      score: cmp.score,
+      quality: cmp.quality,
+      level: cmp.level,
+      levelText: cmp.summary.levelText,
+      lines: cmp.summary.lines,
+      missing: cmp.missing,
+      proxied: cmp.proxied,
+      sideShared: cmp.sideShared,
+      exprMissing: cmp.exprMissing,
+    };
+    report.guesses.params = cmp.params;
+    report.guesses.expressions = cmp.exprs;
+    report.matched.params = sem.PARAM_SLOTS.filter((s) => (cmp.params[s.id] || []).length).length;
+  } else {
+    // 兜底：兼容层挂了也不能让整个探测失败，用老的「标准名 + 关键词」路子。
+    const params = {};
+    const lowerIds = ids.map((id) => id.toLowerCase());
+    for (const slot of sem.PARAM_SLOTS) {
+      let hit = "";
+      for (const c of sem.candidates(slot)) {
+        const i = lowerIds.indexOf(String(c).toLowerCase());
+        if (i >= 0) { hit = ids[i]; break; }
+      }
+      if (!hit) {
+        const fz = fuzzyParam(slot.id, ids);
+        if (fz.length) hit = fz[0];
+      }
+      params[slot.id] = hit ? [hit] : [];
     }
-    if (!hit) {
-      const fz = fuzzyParam(slot.id, ids);
-      if (fz.length) hit = fz[0];
+    report.guesses.params = params;
+    const expMap = {};
+    for (const slot of sem.EXPR_SLOTS) {
+      let hit = names.find((n) => n.toLowerCase() === String(slot.canon || "").toLowerCase()) || "";
+      if (!hit) hit = fuzzyExpr(slot.id, names);
+      expMap[slot.id] = hit;
     }
-    params[slot.id] = hit ? [hit] : [];
-    if (hit) report.matched.params++;
+    report.guesses.expressions = expMap;
+    report.matched.params = sem.PARAM_SLOTS.filter((s) => params[s.id].length).length;
   }
   report.matched.paramsTotal = sem.PARAM_SLOTS.length;
-  report.guesses.params = params;
 
   // 动作：有 idle 组就直接指过去，其余留空（内置库默认就能跑）
   const actions = {};
@@ -410,17 +444,6 @@ function probe(packDir, manifest, opts) {
   if (report.motions.idle) actions.idle = { engine: "model", motion: "idle", index: 0 };
   report.guesses.actions = actions;
 
-  // 表情：先用 canon，再模糊
-  const names = report.expressions.map((e) => e.name);
-  const expMap = {};
-  for (const slot of sem.EXPR_SLOTS) {
-    let hit = "";
-    const i = names.findIndex((n) => n.toLowerCase() === String(slot.canon || "").toLowerCase());
-    if (i >= 0) hit = names[i];
-    if (!hit) hit = fuzzyExpr(slot.id, names);
-    expMap[slot.id] = hit;
-  }
-  report.guesses.expressions = expMap;
 
   report.ok = !!report.moc && report.textures.some((t) => !t.missing);
   if (!report.ok) {

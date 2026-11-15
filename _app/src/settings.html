@@ -192,6 +192,54 @@
   .sw.on{background:linear-gradient(90deg,#3f6fe0,#5b8cff);}
   .sw.on::after{transform:translateX(18px); background:#fff;}
 
+  /* ── 引擎状态卡 ─────────────────────────────────────────────
+     状态点 + 大字标题 + 三个动作按钮，先回答「它现在在跑吗」，
+     再往下才是目录、安装、待机这些要动手的事。 */
+  .eng-head{display:flex; align-items:center; gap:11px; padding:11px 0 10px; border-bottom:1px dashed rgba(44,61,97,.55);}
+  .eng-dot{flex:none; width:9px; height:9px; border-radius:50%; background:var(--faint); box-shadow:0 0 0 3px rgba(98,116,143,.14);}
+  .eng-dot.ok{background:var(--good); box-shadow:0 0 0 3px rgba(61,220,151,.16);}
+  .eng-dot.busy{background:var(--warn); box-shadow:0 0 0 3px rgba(255,200,87,.16); animation:engPulse 1.1s ease-in-out infinite;}
+  .eng-dot.bad{background:var(--bad); box-shadow:0 0 0 3px rgba(255,107,129,.18);}
+  @keyframes engPulse{0%,100%{opacity:1} 50%{opacity:.35}}
+  .eng-head-main{flex:1; min-width:0;}
+  .eng-name{font-size:15px; font-weight:650; letter-spacing:.2px; display:flex; align-items:center; gap:7px;}
+  .eng-name .tag{font-size:10.5px; font-weight:600; padding:1.5px 8px; border-radius:99px; border:1px solid var(--line2); color:var(--dim); background:#0c1425;}
+  .eng-name .tag.ok{color:#08301f; background:var(--good); border-color:transparent;}
+  .eng-name .tag.busy{color:#3a2a00; background:var(--warn); border-color:transparent;}
+  .eng-name .tag.bad{color:#3a0d14; background:var(--bad); border-color:transparent;}
+  .eng-sub{font-size:11.5px; color:var(--dim); margin-top:3px; line-height:1.5;}
+  .eng-actions{display:flex; gap:7px; flex:none;}
+  .eng-actions .mini:disabled{opacity:.42; cursor:default;}
+  .eng-facts{display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); gap:7px 12px; padding:10px 0 5px;}
+  .eng-fact{display:flex; flex-direction:column; gap:2px; min-width:0;}
+  .eng-fact b{font-size:10.5px; font-weight:600; color:var(--faint); letter-spacing:.4px;}
+  .eng-fact i{font-style:normal; font-size:12px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .notice{font-size:11.5px; line-height:1.55; color:var(--dim); background:rgba(91,140,255,.07); border:1px solid rgba(91,140,255,.22); border-radius:8px; padding:7px 10px; margin:6px 0 4px;}
+  .notice.warn{background:rgba(255,200,87,.08); border-color:rgba(255,200,87,.3); color:#ecd8a8;}
+  .notice.bad{background:rgba(255,107,129,.08); border-color:rgba(255,107,129,.3); color:#f2bcc4;}
+  .notice.ok{background:rgba(61,220,151,.08); border-color:rgba(61,220,151,.28); color:#a9e8c8;}
+  .notice b{color:#cfe0ff; font-weight:600;}
+  /* 体检结果：一行一项，点不动也不吵，但坏了的那一项会自己往前顶 */
+  .diag-list{display:flex; flex-direction:column; margin-top:2px;}
+  .diag-item{display:flex; align-items:flex-start; gap:9px; padding:7px 2px; border-top:1px dashed var(--line); font-size:11.5px; line-height:1.55;}
+  .diag-item:first-child{border-top:0;}
+  .diag-item .d{width:7px; height:7px; border-radius:50%; margin-top:5px; flex:none; background:var(--faint);}
+  .diag-item.ok .d{background:var(--good);}
+  .diag-item.warn .d{background:var(--warn);}
+  .diag-item.bad .d{background:var(--bad); box-shadow:0 0 0 3px rgba(255,107,129,.14);}
+  .diag-item .t{flex:1; min-width:0;}
+  .diag-item .t b{color:var(--text); font-weight:600; margin-right:6px;}
+  .diag-item .t i{font-style:normal; color:var(--dim);}
+  .diag-item .t em{display:block; font-style:normal; color:var(--faint); font-size:11px; margin-top:1px;}
+  .diag-item.bad .t em{color:#e5a3ac;}
+  .diag-more{align-self:flex-start; margin-top:6px; background:transparent; border:0; padding:2px 0; color:var(--accent); font-size:11.5px; cursor:pointer;}
+  .diag-more:hover{text-decoration:underline;}
+  /* 闲置词预合成进度：一条细的，够看就行——它不是主角，只是「还在动」的证据。 */
+  .idle-bar{height:4px; border-radius:2px; background:var(--panel2); overflow:hidden; margin:6px 0 2px;}
+  .idle-bar > i{display:block; height:100%; width:0; background:var(--accent); transition:width .25s ease;}
+  .idle-bar.done > i{background:var(--good);}
+  .idle-bar.bad > i{background:var(--bad);}
+
   .row input[type=text], .row input[type=password], .row input[type=number],
   .stack input, .stack select, .row select{
     background:#0c1425; border:1px solid var(--line2); border-radius:7px;
@@ -387,6 +435,17 @@
         </div>
 
         <div class="card">
+          <h3>一键体检<span class="hint">点一下，逐项查</span></h3>
+          <p class="hint">她忽然不出声了、窗口不见了、热键按了没反应 —— 先点这里。查完会在数据目录留一份详细报告，可以直接发出去，谁修都能看懂是哪一环坏了。</p>
+          <div class="quick">
+            <button id="diagRunBtn" type="button">开始体检</button>
+            <button id="diagOpenReport" type="button" disabled>打开详细报告</button>
+          </div>
+          <p class="notice" id="diagHead">还没查过 · 一共十几项，几秒钟。</p>
+          <div class="diag-list" id="diagList"></div>
+        </div>
+
+        <div class="card">
           <h3>运行状态<span class="hint">只读摘要</span></h3>
           <div class="row">
             <div class="label">版本<small id="ovEnv">正在读取…</small></div>
@@ -556,6 +615,40 @@
           </div>
 
           <div class="card">
+            <h3>她主动说话的时候<small class="hint">闲置词 · 攒了 <b id="idleLineCount">—</b> 句</small></h3>
+            <p class="hint">你没说话的时候她会自己嘟囔两句。这两句要不要真的出声、要不要冒气泡，分开管：<b>开会只想看字</b>就关声音，<b>深夜只想听</b>就关气泡。</p>
+
+            <div class="row">
+              <div class="label">出声<small>关掉就只是气泡里的一行字，不唤醒语音引擎——游戏和会议都省心</small></div>
+              <div class="sw on" id="idleSpeak" role="switch" tabindex="0" aria-checked="true" aria-label="闲置词出声"></div>
+            </div>
+            <div class="row">
+              <div class="label">冒气泡<small>关掉就只有声音（如果你把上面也关了，那就是彻底安静）</small></div>
+              <div class="sw on" id="idleBubble" role="switch" tabindex="0" aria-checked="true" aria-label="闲置词冒气泡"></div>
+            </div>
+
+            <div class="row row-stack">
+              <div class="label">语音预合成<small>把这套句子按当前引擎和音色先合成好存到本机。之后触发时直接播文件，<b>0 延迟</b>，也不会跟你要听的那句话抢引擎</small></div>
+              <div class="stack">
+                <div class="voiceline">
+                  <div class="hint" id="idleCacheInfo" style="flex:1;min-width:0">正在读取…</div>
+                  <button class="mini" id="idleCacheBuild" type="button">预合成</button>
+                  <button class="mini" id="idleCacheCancel" type="button" hidden>停下</button>
+                  <button class="mini" id="idleCacheClear" type="button">清空</button>
+                  <button class="mini" id="idleCacheOpen" type="button">打开目录</button>
+                </div>
+                <div class="idle-bar" id="idleCacheBar" hidden><i></i></div>
+                <div class="hint" id="idleCacheHint">只有飞鱼、XTTS 和内置 TTS 能预合成；RVC 是实时换嗓子，合成出来的还是原声，所以不做。</div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="label">换引擎或音色就自动补<small>开着的话，你选了新声音她会自己在后台补缓存；关着就要点上面的「预合成」</small></div>
+              <div class="sw" id="idleCacheAuto" role="switch" tabindex="0" aria-checked="false" aria-label="自动补缓存"></div>
+            </div>
+          </div>
+
+          <div class="card">
             <h3>存储与识别</h3>
             <div class="row row-stack">
               <div class="label">存储<small>语音缓存和语音识别模型。默认在系统用户目录，约 1.8G；换盘要重启软件生效</small></div>
@@ -584,6 +677,72 @@
         </div>
 
         <div class="subpage" data-sub="timbre">
+          <!-- ── ① 现在用的是哪个引擎 ─────────────────────────────
+               放最前面：用户进这一页第一件想知道的事是「它到底在跑吗」，
+               而不是「参考音频文件夹填哪」。状态、目录、启停、待机全在这一张卡里。 -->
+          <div class="card" id="engCard">
+            <h3>现在用的是哪个引擎<span class="hint" id="engPollHint">每 3 秒自动刷新</span></h3>
+
+            <div class="eng-head">
+              <span class="eng-dot" id="engDot"></span>
+              <div class="eng-head-main">
+                <div class="eng-name"><span id="engName">读取中…</span><span class="tag" id="engTag">—</span></div>
+                <div class="eng-sub" id="feiyuEngineState">正在检测引擎…</div>
+              </div>
+              <div class="eng-actions">
+                <button class="mini" id="feiyuEngineStart" type="button" title="把模型提前装进显存，点完就能立刻试听">一键启动</button>
+                <button class="mini" id="feiyuEngineStop" type="button" title="立刻把模型从显存里放掉">关闭引擎</button>
+                <button class="mini" id="feiyuEngineCheck" type="button" title="立刻重新检测一次，不用等自动刷新">刷新</button>
+              </div>
+            </div>
+
+            <div class="eng-facts">
+              <span class="eng-fact"><b>实际出声</b><i id="engFactEngine">—</i></span>
+              <span class="eng-fact"><b>运行设备</b><i id="engFactDevice">—</i></span>
+              <span class="eng-fact"><b>闲置释放</b><i id="engFactIdle">—</i></span>
+              <span class="eng-fact"><b>引擎目录</b><i id="engFactHome" title="">—</i></span>
+            </div>
+
+            <p class="notice" id="feiyuState">未启用</p>
+            <p class="hint" id="engFallbackNote">引擎没起来时不会让你听不到声音：会自动回落内置 TTS，并且当场说明是哪个环节出的问题。</p>
+
+            <div id="engFeiyuRows">
+              <div class="row row-stack">
+                <div class="label">引擎目录<small>飞鱼装在哪。这个目录下要有 <b>venv / models / cosyvoice</b> 三个子目录；换过位置就在这里改，改完点「校验」</small></div>
+                <div class="voiceline">
+                  <input id="feiyuHome" aria-label="飞鱼引擎目录" type="text" placeholder="留空自动找（包内 feiyu/ 或 D:\feiyu）" spellcheck="false" />
+                  <button class="mini" id="feiyuHomePick" type="button">选目录</button>
+                  <button class="mini" id="feiyuHomeCheck" type="button" title="逐项检查这个目录里的 python / 服务脚本 / 声库 / cosyvoice">校验</button>
+                </div>
+                <div class="hint" id="feiyuHomeInfo"></div>
+              </div>
+
+              <div class="row row-stack">
+                <div class="label">运行环境<small>整套约 <b>14 GB</b>（声库 7.1G + 运行环境 5.6G + 中文 Hubert 1.2G）。不随安装包发，点右边自己下，中途可以关窗口，下次接着装</small></div>
+                <div class="voiceline">
+                  <span class="hint" id="feiyuEnvState" style="flex:1">正在检查…</span>
+                  <button class="mini" id="feiyuInstall" type="button">一键安装</button>
+                </div>
+              </div>
+
+              <div class="row">
+                <div class="label">闲置自动关闭<small>这么久没人说话，就把模型从显存里放掉（省 8GB 左右）。下次开口会自动重新装载，第一句约 25 秒；不想要就关掉这个开关</small></div>
+                <div class="voiceline" style="flex:0 0 auto">
+                  <input id="feiyuIdleMin" aria-label="闲置多少分钟自动关闭引擎" type="text" inputmode="numeric" style="width:58px" placeholder="10" />
+                  <span class="hint">分钟</span>
+                  <div class="sw on" id="feiyuIdleAuto" role="switch" tabindex="0" aria-checked="true" title="关掉就一直占着显存，不再自动释放"></div>
+                </div>
+              </div>
+              <div class="hint" id="feiyuIdleHint">现在：闲置 10 分钟后释放。</div>
+
+              <div class="row">
+                <div class="label">启动时预热<small>打开后启动就把飞鱼模型装进显存，第一句更快；关掉能省约 8GB 内存，但闲置释放后第一次说话要等引擎重新装载</small></div>
+                <div class="sw" id="voiceWarm" role="switch" tabindex="0" aria-checked="false"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── ② 用哪个引擎（四选一） ─────────────────────────── -->
           <div class="card">
             <h3>用哪个引擎<span class="hint">四选一</span></h3>
             <div class="row">
@@ -596,10 +755,7 @@
               </div>
             </div>
             <p class="hint" id="timbreNote">TTS 用的是上面选的音色（内置引擎），不需要装任何东西，开箱就能说话。</p>
-            <div class="row">
-              <div class="label">启动时预热<small>打开后启动就把飞鱼模型装进显存，第一句更快；关掉能省约 8GB 内存，但闲置十分钟后第一次说话要等引擎重新装载</small></div>
-              <div class="sw" id="voiceWarm" role="switch" tabindex="0" aria-checked="false"></div>
-            </div>
+            <p class="hint">出声顺序：<b>你选的引擎 → 另一个本地引擎 → 内置 TTS</b>。任何一级没起来都不会静音，只会换成下一级，并在上面那张卡里写清楚为什么。</p>
           </div>
 
           <div class="card">
@@ -628,24 +784,7 @@
                   <button class="mini tryvoice" id="feiyuTry" type="button">试一句</button>
                 </div>
                 <div class="hint" id="feiyuRefInfo">文件夹里每段音频配一个同名 .txt（写它说了什么），文件名就是下拉里显示的名字</div>
-                <div class="voiceline">
-                  <span class="mini-note">环境</span>
-                  <input id="feiyuHome" aria-label="飞鱼引擎目录" type="text" placeholder="留空自动找（包内 feiyu/ 或 D:\feiyu）" />
-                  <button class="mini" id="feiyuHomePick" type="button">选目录</button>
-                </div>
-                <div class="hint" id="feiyuHomeInfo">飞鱼装在哪。这个目录下应该有 venv / models / cosyvoice 三个子目录；换位置后在这里填一下</div>
-                <div class="voiceline">
-                  <span class="mini-note">状态</span>
-                  <span class="hint" id="feiyuEnvState" style="flex:1;min-width:0">正在检查…</span>
-                  <button class="mini" id="feiyuInstall" type="button">一键安装</button>
-                </div>
-                <div class="voiceline">
-                  <span class="mini-note">引擎</span>
-                  <span class="hint" id="feiyuEngineState" style="flex:1;min-width:0">正在检测引擎…</span>
-                  <button class="mini" id="feiyuEngineCheck" type="button" title="重新检测一次引擎是否在跑">重测</button>
-                </div>
-                <div class="hint">飞鱼是基于 CosyVoice3 的中文角色声线（cute / gentle 两种风格），原声来自 B 站 UP 主「星落落_oi」，已获授权用于声库训练。它不卷舌、语气自然，是这里音质最好的一个。<b>整套约 14 GB</b>（声库 7.1G + 运行环境 5.6G + 中文 Hubert 1.2G），所以不随安装包发——点「一键安装」，它会自己从国内镜像下完并配好，中途可以关窗口，下次接着装。</div>
-                <div class="hint" id="feiyuState">未启用</div>
+                <div class="hint">飞鱼是基于 CosyVoice3 的中文角色声线（cute / gentle 两种风格），原声来自 B 站 UP 主「星落落_oi」，已获授权用于声库训练。它不卷舌、语气自然，是这里音质最好的一个。</div>
               </div>
             </div>
 
@@ -737,6 +876,16 @@
               <div class="label">自动眨眼<small>关掉她就一直瞪着你</small></div>
               <div class="sw" id="blinkEnabled" role="switch" tabindex="0" aria-checked="false"></div>
             </div>
+          </div>
+
+          <div class="card">
+            <h3>游戏模式<span class="hint">别跟我抢帧</span></h3>
+            <p class="hint">进去之后她整个停住：不画、不轮询屏幕、连语音模型的显存也还回去（约 8GB 那部分）。窗口会从任务栏和 Alt-Tab 里消失，托盘图标还在 —— 点托盘里的「退出游戏模式」，或者按一次唤出热键，她就回来。</p>
+            <div class="row">
+              <div class="label">进入游戏模式<small>现在进：窗口立刻隐藏，帧率归零；再点一次退出</small></div>
+              <div class="sw" id="gameMode" role="switch" tabindex="0" aria-checked="false"></div>
+            </div>
+            <p class="notice" id="gameModeHint">现在不在游戏模式。</p>
           </div>
 
           <div class="card">
@@ -927,6 +1076,14 @@
 
           <div id="bridgeResult" class="result"></div>
           <div id="bridgeAddrs" class="addrs"></div>
+
+          <!-- 一键自愈：以前这里只有「启动/停止」，用户得自己判断到底该不该起、
+               起来了要不要改地址。现在一次点击把这三件事都办掉，并把结论写在下面。 -->
+          <div class="row">
+            <div class="label">一键自检并修复<small>先探你填的地址；不通就自己起一个随身桥接，并把地址指过去。你填的远端地址不会被改。</small></div>
+            <button id="bridgeFix" class="mini">自检并修复</button>
+          </div>
+          <p class="notice" id="bridgeFixHint">还没检查过。</p>
 
           <div class="row">
             <div class="label">本机自带桥接<small>这台电脑没装 phone-bridge？点一下，程序自己起一个小桥接直接连本机 DSH</small></div>

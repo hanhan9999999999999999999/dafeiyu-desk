@@ -62,10 +62,51 @@ let curStyle = '';
 // 所以换目录必须重启子进程才生效，这里记下来做比对。
 let lastRefDir = '';
 
-const IDLE_MS = Number(process.env.FISH_FEIYU_IDLE_MS || 10 * 60 * 1000);
+const IDLE_DEFAULT = 10 * 60 * 1000;
+
+/** 待机多久自动释放。0 = 不自动释放（常驻，随时候命）。
+ *
+ * 以前这是模块加载时从环境变量读死的常量，界面上没有入口 —— 用户只知道「过一会儿
+ * 第一句话要等二十秒」，却找不到哪里能改。现在由 settings 的 feiyuIdleAuto /
+ * feiyuIdleMin 驱动，server 每次访问引擎前调用 setIdleMs() 同步过来。
+ */
+let IDLE_MS = Number(process.env.FISH_FEIYU_IDLE_MS || IDLE_DEFAULT);
+if (!Number.isFinite(IDLE_MS) || IDLE_MS < 0) IDLE_MS = IDLE_DEFAULT;
+
+/** 最后一次真正用到引擎的时刻（ms），设置页用它算「还有多久释放」。 */
+let lastUseAt = 0;
 
 export function available() {
   return fs.existsSync(PY) && fs.existsSync(SCRIPT) && fs.existsSync(path.join(PKG, 'manifest.json'));
+}
+
+/** 环境里到底缺什么 —— 给「引擎目录填错了」这种情况一个能看懂的回答。
+ *  只报缺的那一项，不猜原因：venv / 脚本 / manifest / cosyvoice 四样分开数。 */
+export function missingParts(home) {
+  const h = home || HOME;
+  const venvPy = process.env.FISH_FEIYU_PY || path.join(h, 'venv', 'Scripts', 'python.exe');
+  const pkg = process.env.FEIYU_PKG || path.join(h, 'models', 'FeiyuVoice-CosyVoice3');
+  const repo = process.env.FEIYU_REPO || path.join(h, 'cosyvoice');
+  const miss = [];
+  if (!fs.existsSync(venvPy)) miss.push({ key: 'venv', label: 'Python 运行环境（venv\\Scripts\\python.exe）', path: venvPy });
+  if (!fs.existsSync(SCRIPT)) miss.push({ key: 'script', label: '启动脚本 feiyu_server.py（程序自带）', path: SCRIPT });
+  if (!fs.existsSync(path.join(pkg, 'manifest.json'))) miss.push({ key: 'pkg', label: '飞鱼声库（models\\FeiyuVoice-CosyVoice3\\manifest.json）', path: pkg });
+  if (!fs.existsSync(repo)) miss.push({ key: 'repo', label: 'CosyVoice 代码（cosyvoice\\）', path: repo });
+  return miss;
+}
+
+/** 换一个引擎目录做「这条路径能不能用」的检查，不改任何状态。
+ *  用户在设置里手打路径、或者想先看看某块盘上的旧环境能不能直接复用，用这个。 */
+export function checkHome(home) {
+  const h = String(home || '').trim();
+  if (!h) return { ok: true, resolved: HOME, missing: missingParts(HOME), note: '留空 = 自动找' };
+  const miss = missingParts(h);
+  return {
+    ok: miss.length === 0,
+    resolved: h,
+    missing: miss,
+    note: miss.length === 0 ? '这个目录可以直接用' : '这个目录还缺 ' + miss.length + ' 样东西',
+  };
 }
 
 export function status() {
@@ -78,8 +119,32 @@ export function status() {
     styles,
     port: PORT,
     pkg: PKG,
+    home: HOME,
+    python: PY,
+    missing: missingParts(),
     lastError: lastErr,
+    idle: idleInfo(),
   };
+}
+
+/** 待机信息：设置页要显示「还有 X 分钟释放」，就得知道上次用到是什么时候。 */
+export function idleInfo() {
+  return {
+    ms: IDLE_MS,
+    auto: IDLE_MS > 0,
+    lastUseAt,
+    // 0 = 不自动释放，或者还没用过（这时计时器也没起）
+    nextAt: IDLE_MS > 0 && lastUseAt ? lastUseAt + IDLE_MS : 0,
+  };
+}
+
+/** 设置页改待机时长时调这里。0 = 常驻不释放。 */
+export function setIdleMs(ms) {
+  const n = Number(ms);
+  IDLE_MS = Number.isFinite(n) && n > 0 ? Math.min(12 * 60 * 60 * 1000, Math.max(60 * 1000, n)) : 0;
+  if (IDLE_MS > 0 && lastUseAt) touchIdle();      // 已经用过的，按新时长重排
+  if (IDLE_MS === 0 && idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+  return idleInfo();
 }
 
 function log(...a) {
@@ -168,7 +233,11 @@ async function ensure(refDir) {
 }
 
 function touchIdle() {
+  lastUseAt = Date.now();
   if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = null;
+  // 0 = 用户在设置里关掉了「待机自动关闭」，那就常驻。别偷偷还是排个计时器。
+  if (IDLE_MS <= 0) return;
   idleTimer = setTimeout(() => {
     // 空闲就还显存。下次要用会重新加载（十几秒），由下一次对话承担，
     // 比一直占着 4.6GB 划算 —— 她大部分时间是待机的。
@@ -187,6 +256,25 @@ function touchIdle() {
     }, 30 * 1000).unref?.();
   }, IDLE_MS);
   if (idleTimer.unref) idleTimer.unref();
+}
+
+/** 手动启动引擎（设置页的「启动」按钮）。
+ *  跟第一次合成时自动拉起走的是同一个 ensure()，所以不会起两个进程；
+ *  区别只是这里可以带 refDir，并且会顺手把待机计时器开起来。
+ *  返回 status()，前端直接拿来刷新界面，不用再发一次 /engine/feiyu_status。 */
+export async function start(opts = {}) {
+  await ensure(opts.refDir);
+  touchIdle();
+  try {
+    const h = await ping(600);
+    if (h) {
+      ready = !!h.ready;
+      device = h.device || device;
+      styles = h.styles || styles;
+      curStyle = h.style || curStyle;
+    }
+  } catch { }
+  return status();
 }
 
 /**

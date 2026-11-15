@@ -127,6 +127,61 @@
   // 这一轮「等她回复」有没有出问题：null = 正常，{code:"partial"|"stalled"} 见 waitReply。
   // 半截和最坏一眼的区别：半截是「她说到一半」，最坏是「一个字也没等到」。
   let lastReplyIssue = null;
+
+  // ── 「你选的引擎没出声」必须说出来 ────────────────────────
+  // 以前：飞鱼没装好、显存不够、进程崩了，服务端只往日志写一行就悄悄换成
+  // Edge TTS。用户听到的是另一个声线，却以为自己选的就是这个声音 ——
+  // 这不是「降级优雅」，是骗人。现在 /engine/tts 把原因一起回传（fellBack），
+  // 这里负责三件事：记日志、进故障表（诊断页/诊断包里能看到）、用她的口吻说明。
+  // 同一条原因 5 分钟内只打扰一次：聊十句弹十次气泡，比不说还烦。
+  const FALLBACK_QUIET_MS = 5 * 60 * 1000;
+  const fallbackSaidAt = Object.create(null);
+  let lastFallback = null;   // 给诊断面板读的「最近一次是谁在替我说话」
+
+  function fallbackHuman(fb) {
+    const from = (fb && fb.from) || "";
+    const who = from === "xtts" ? "XTTS" : from === "feiyu" ? "飞鱼" : "你选的那个声音";
+    const raw = String((fb && fb.reason) || "");
+    let why = "这会儿没起来";
+    if (/环境不全/.test(raw)) why = "本机还没装齐";
+    else if (/CUDA|out of memory|显存|OOM/i.test(raw)) why = "显卡挤不出显存";
+    else if (/not found|ENOENT|no such file|找不到/i.test(raw)) why = "它的文件找不到";
+    else if (/timeout|timed out|超时|ETIMEDOUT/i.test(raw)) why = "它回得太慢，我没等住";
+    else if (/ECONNREFUSED|没连上|fetch failed|ECONNRESET/i.test(raw)) why = "它的服务没连上";
+    return { who, why, raw };
+  }
+
+  function noteFallback(j, where) {
+    const fb = j && j.fellBack;
+    if (!fb) return;
+    const h = fallbackHuman(fb);
+    const engineNow = String((j && j.engine) || "tts");
+    const key = String(fb.from || "?") + "|" + h.why;
+    const now = Date.now();
+    lastFallback = { from: fb.from || "", reason: h.raw, who: h.who, why: h.why, engine: engineNow, at: now };
+    log("回落：" + h.who + " → " + engineNow + "（" + h.raw + "）" + (where ? " @" + where : ""));
+
+    // 故障表：只记「真的换了人」这一档，而且按原因去重，
+    // 免得一次聊天把整张表刷满同一条。
+    if (!fallbackSaidAt[key]) {
+      reportFault("voice-fallback", {
+        code: "fallback-" + (fb.from || "engine"),
+        short: h.who + "没出声，换成 " + engineNow,
+        detail: h.who + " 这次" + h.why + "，这句话是用 " + engineNow + " 念的。"
+          + "检查：设置 → 声音与行为 → 变声引擎，看引擎状态和「一键启动」；"
+          + "还不行就点诊断，里面有这个引擎的完整记录。",
+        raw: h.raw,
+      });
+    }
+    if (fallbackSaidAt[key] && now - fallbackSaidAt[key] < FALLBACK_QUIET_MS) return;
+    fallbackSaidAt[key] = now;
+    try {
+      if (window.FishSay) {
+        window.FishSay(h.who + "还没起来——" + h.why + "，这句先借内置的声音替我说。", "sad", 5200);
+      }
+    } catch (e) { }
+  }
+
   // 上一次读 /api/state 有没有成功拿到基线。读不到时 since 会是 0，
   // 拿它当基准 = 把历史里任何一条 assistant 消息都当成「新回复」念出来。
   let snapOk = false;
@@ -931,6 +986,8 @@
     if (!r.ok) throw new Error("HTTP " + r.status);
     const j = await r.json();
     if (!j || !j.ok || !j.url) throw new Error((j && j.error) || "没有音频");
+    // 引擎没出声、被换掉了 —— 这次要让她说出来，而不是让用户以为「就这音色」。
+    noteFallback(j, "speakLocal");
     log("内置引擎合成 " + (j.dur || "?") + "s (" + (j.engine || "?") +
       ") 音色=" + (j.voice || voiceId || "默认"));
     // /engine/tts 返回的是同源相对路径，直接播
@@ -971,6 +1028,7 @@
     // 音色写进日志：换音色之后要能从日志里确认真的换了（RVC 只是再改一遍音色，
     // 前段 TTS 用哪个声音仍然是由 voiceId 决定的）。
     log("RVC 前段合成 " + (j.dur || "?") + "s 音色=" + (j.voice || j.asked || "?"));
+    noteFallback(j, "speakRvc");
 
     // 2) 取回音频原始字节（mp3 或 wav 都行，Python 端 soundfile 1.2.2 能直接读）
     const src = await fetch(location.origin + j.url, { signal: AbortSignal.timeout(30000) });
@@ -1084,6 +1142,9 @@
     if (!r.ok) throw new Error("合成 HTTP " + r.status);
     const j = await r.json();
     if (!j || !j.ok || !j.url) throw new Error((j && j.error) || "没有音频");
+    // 分段流式是「每句一次 /engine/tts」，回落提示自己有 5 分钟静默，
+    // 不会一句一弹。
+    noteFallback(j, "synthChunk");
     // /engine/tts 的产物由主进程缓存和清理，这里直接引用，不用 revoke
     return location.origin + j.url;
   }
@@ -1148,11 +1209,12 @@
             owned.push(url);
             queue.push(url);
             got += 1;
+            wakeUp();
             if (got === 1) { firstDur = Number(ev.dur) || 0; log("飞鱼首段 " + ((Date.now() - t0) / 1000).toFixed(2) + "s / " + (ev.dur || 0) + "s"); }
           }
         }
       }
-    })().catch(function (e) { failed = e; }).finally(function () { finished = true; });
+    })().catch(function (e) { failed = e; wakeUp(); }).finally(function () { finished = true; wakeUp(); });
 
     // 第一块只有 1 秒出头时再等第二块：紧跟的第二块往往还没算完，
     // 只等一块会在一句话中间断掉。第一块本身够长（≥1.0s）就先播，
@@ -1163,7 +1225,7 @@
       if (queue.length >= 2) break;
       if (queue.length >= 1 && firstDur >= 1.0) break;
       if (Date.now() - tw > 120000) { failed = new Error("首段超时"); break; }
-      await sleep(50);
+      await waitTick(50);
     }
     if (failed || !queue.length) {
       try { await readerTask; } catch (e) { }
@@ -1185,7 +1247,7 @@
         continue;
       }
       if (finished) break;
-      await sleep(30);
+      await waitTick(30);
     }
     try { await readerTask; } catch (e) { }
     owned.forEach(function (u) { setTimeout(function () { try { URL.revokeObjectURL(u); } catch (e) { } }, 3000); });
@@ -1198,6 +1260,33 @@
   let speechGen = 0;
   // 一轮回复的取消标记：用户打断/新回复开始时加一，旧的句子流水线自己收手。
   let speechAbort = 0;
+
+  // ── 唤醒通知（取代 30/50ms 轮询）────────────────────────────────
+  // 以前播放线程一直用 sleep(30/50) 反复问「下一块好了没」：每段最多白等 50ms，
+  // 一句五段的回复就凭空多出小半秒的停顿，CPU 还一直在空转。
+  // 现在改成「谁往队列里放了东西就把等的人叫醒」，正常路径上没有轮询；
+  // ms 仍然保留，是兜底超时（合成线程死了不会把播放线程挂死）。
+  let wakeFns = [];
+  function wakeUp() {
+    const w = wakeFns;
+    wakeFns = [];
+    for (let i = 0; i < w.length; i += 1) { try { w[i](); } catch (e) { } }
+  }
+  function waitTick(ms) {
+    return new Promise(function (res) {
+      let settled = false;
+      const t = ms > 0 ? setTimeout(fin, ms) : null;
+      function fin() {
+        if (settled) return;
+        settled = true;
+        if (t) clearTimeout(t);
+        const i = wakeFns.indexOf(fin);
+        if (i >= 0) wakeFns.splice(i, 1);
+        res();
+      }
+      wakeFns.push(fin);
+    });
+  }
 
   async function speakStreaming(text) {
     const chunks = splitSentences(text);
@@ -1221,14 +1310,16 @@
         } catch (e) {
           // 某一段合不出来就跳过，别整段哑掉
           log("第 " + (i + 1) + " 段合成失败：" + (e && e.message ? e.message : e));
-          if (i === 0) { failed = e; return; }   // 第一句就挂了，交给外面的回落
+          if (i === 0) { failed = e; wakeUp(); return; }   // 第一句就挂了，交给外面的回落
           continue;
         }
         if (my !== speechGen) { try { if (url.startsWith("blob:")) URL.revokeObjectURL(url); } catch (e) { } return; }
         if (url.startsWith("blob:")) owned.push(url);
         queue.push(url);
+        wakeUp();
       }
       finished = true;
+      wakeUp();
     })();
 
     // 等第一块，等不到就说明第一句就失败了
@@ -1236,7 +1327,7 @@
     while (!queue.length && !finished && !failed) {
       if (my !== speechGen) break;
       if (Date.now() - t0 > 90000) { failed = new Error("首段超时"); break; }
-      await sleep(50);
+      await waitTick(50);
     }
     if (failed) {
       log("分段合成首段失败（" + (failed.message || failed) + "），回落整段");
@@ -1254,7 +1345,7 @@
         continue;
       }
       if (finished) break;
-      await sleep(50);
+      await waitTick(50);
     }
     try { await producer; } catch (e) { }
     // blob URL 别一直攒着
@@ -1777,6 +1868,10 @@
     // 只出声、不走对话：验证「语音输出」这条路（TTS / RVC）时用。
     // say() 会先发消息再等回复，测声音不需要这么重。
     speak: (text) => speak(text),
+    // 直接播一个已经存在的音频地址（闲置词的预合成缓存走这里）。
+    // 不走合成、不进 TTS 队列，但口型、音量、静音、打断规则与正常说话完全一致——
+    // 否则缓存那几句会像「另一个程序在放声音」，嘴不动、静音也停不下来。
+    playUrl: (url) => playAudio(url),
     // 自测专用：走真实的「收到回复」入口（会弹气泡 + 说话）。
     // 只有 speak() 的话测不到「整条链都失败时她会不会说一句」——
     // 那一步在 finishReply 里，是这一轮真正修掉的东西。

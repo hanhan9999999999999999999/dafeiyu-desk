@@ -15,6 +15,21 @@ function buildTrayMenu(ctx) {
   const c = ctx || {};
   const foods = Array.isArray(c.foods) ? c.foods : [];
   const s = c.settings || {};
+
+  // 游戏模式是「她不在这台屏幕上了」的状态：菜单只剩一个主项（把她叫回来）和
+  // 几个不经过设置窗的救命入口。这时候还摆一屏「喂她一口 / 摸摸头」纯属添乱。
+  if (c.gameMode) {
+    return [
+      { label: "退出游戏模式（把她叫回来）", click: () => c.setGameMode(false) },
+      { type: "separator" },
+      { label: "设置…", click: c.openSettings },
+      { label: "导出诊断包…", click: c.exportDiag },
+      { label: "打开运行日志", click: c.openLogFile },
+      { type: "separator" },
+      { label: "退出", click: c.quit },
+    ];
+  }
+
   return [
     { label: "显示 / 隐藏", click: () => c.toggleWindow() },
     {
@@ -37,6 +52,7 @@ function buildTrayMenu(ctx) {
       checked: !!c.paused,
       click: (item) => c.setPaused(!!(item && item.checked)),
     },
+    { label: "游戏模式（极致省性能）", click: () => c.setGameMode(true) },
     { label: "看屏幕…", click: c.openSeeWatch },
     { label: "相处档案…", click: c.openProfile },
     { label: "对话记录…", click: c.openChatLog },

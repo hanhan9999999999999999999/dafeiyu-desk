@@ -107,6 +107,27 @@ const DEFAULTS = {
   // 飞鱼环境的根目录（下面应该有 venv/ models/ cosyvoice/ 三个子目录）。
   // 留空 = 自动找：包内 feiyu/ → D:\feiyu。别人把飞鱼装到别处时在这里填一下。
   feiyuHome: "",
+  // 引擎待机自动关闭：多久没人说话就把模型挪出显存、进程也收掉。
+  // 开着省内存（4.6GB 显存 + 几 GB 内存），代价是下次开口要重新装载；
+  // 关掉就常驻，随时候命。默认 10 分钟，和飞鱼引擎内部的默认值保持一致。
+  feiyuIdleAuto: true,
+  feiyuIdleMin: 10,
+  // 游戏模式：藏起来 + 停渲染 + 释放语音模型显存。这是「开关状态」不是「本次运行状态」，
+  // 所以存盘：上次在游戏模式里退出的，这次也静静地起来（托盘里点一下就回来）。
+  gameMode: false,
+  // 闲置词：她自己开口说一句的时候，出不出声、冒不冒气泡。
+  // 两个开关分开是有原因的——有人喜欢她只冒字不出声（开会、深夜），
+  // 也有人只想听声音不想看气泡挡屏幕。默认按大多数人：都说、都冒。
+  idleSpeak: true,
+  idleBubble: true,
+  // 闲置词的语音预合成：选定引擎与音色后可以先把这些句子合成好存起来，
+  // 之后触发时直接播缓存，不必等合成（飞鱼一句要 1–2 秒，缓存是 0）。
+  // auto = 换了引擎/音色就自己补缓存；engine/voice 记的是「这份缓存是给谁做的」，
+  // 跟当前设置对不上就不算命中，宁可重合成也不要拿别人的声音冒充。
+  idleCacheAuto: false,
+  idleCacheEngine: "",
+  idleCacheVoice: "",
+  idleCacheAt: 0,
   // 全局快捷键
   // 一键开麦：按下就在主窗口里切换语音输入（等同点那个圆形按钮）。
   // 留空 = 不注册。Accelerator 写法，如 CommandOrControl+Alt+M。
@@ -147,10 +168,12 @@ const RANGES = {
   rvcPitch: [-12, 12],
   seeInterval: [0.8, 6],
   seeGap: [3, 60],
+  // 引擎待机时长（分钟）：1 分钟到 12 小时。0 在敏感化里会被当成「关掉自动释放」。
+  feiyuIdleMin: [1, 720],
 };
 
 const BOOLS = [
-  "rvcAutoStop", "alwaysOnTop", "clickThrough", "followCursor", "autoIdle", "blinkEnabled", "sharpen", "launchAtLogin", "dockAutoHide", "seeSpeak", "mute", "exprPatch"];
+  "rvcAutoStop", "alwaysOnTop", "clickThrough", "followCursor", "autoIdle", "blinkEnabled", "sharpen", "launchAtLogin", "dockAutoHide", "seeSpeak", "mute", "exprPatch", "feiyuIdleAuto", "gameMode", "idleSpeak", "idleBubble", "idleCacheAuto"];
 
 function clamp(v, lo, hi) {
   const n = Number(v);
@@ -269,6 +292,26 @@ function sanitize(raw) {
   out.seeInterval = clamp(out.seeInterval, 0.8, 6) ?? DEFAULTS.seeInterval;
   out.seeGap = clamp(out.seeGap, 3, 60) ?? DEFAULTS.seeGap;
   if (out.feiyuHome && !/[\\/]/.test(out.feiyuHome)) out.feiyuHome = "";
+  // 闲置词缓存记的是「这份缓存是给哪个引擎、哪个音色做的」。
+  // 只留 ASCII 安全字符：这两个值会变成缓存目录名，带上 : 或 / 就成路径穿越了。
+  {
+    const safe = (v) => (typeof v === "string" && /^[A-Za-z0-9_.@-]{0,64}$/.test(v) ? v : "");
+    out.idleCacheEngine = safe(raw.idleCacheEngine);
+    out.idleCacheVoice = safe(raw.idleCacheVoice);
+    const t = Number(raw.idleCacheAt);
+    out.idleCacheAt = Number.isFinite(t) && t > 0 ? Math.round(t) : 0;
+  }
+  // 待机时长：分钟数取整，落在 1–720 之间。写 0 或负数 = 用户想常驻，那就关掉自动释放，
+  // 时长回默认值 —— 免得以后再把开关打开时是一个 0 分钟的怪值。
+  {
+    const m = Number(out.feiyuIdleMin);
+    if (!Number.isFinite(m) || m <= 0) {
+      out.feiyuIdleAuto = false;
+      out.feiyuIdleMin = DEFAULTS.feiyuIdleMin;
+    } else {
+      out.feiyuIdleMin = Math.round(Math.min(720, Math.max(1, m)));
+    }
+  }
   if (out.rvcBackend !== "onnx" && out.rvcBackend !== "pth") out.rvcBackend = DEFAULTS.rvcBackend;
   // 引擎和设备要配套：配置文件里 device 可能还是 cuda:0，而 onnx 走 DirectML。
   // onnxruntime 只有 dml / cpu，不认识 cuda:0（除非装了 GPU 版），留着它会启动失败。

@@ -11,6 +11,10 @@
   if (!curveLib) console.error("[fish] lib/curve.js 没加载，动作曲线会退化成直线");
   const curve = curveLib ? curveLib.curve : (t2, pts2) => (pts2 && pts2.length ? pts2[0][1] : 0);
   const clampNum = curveLib ? curveLib.clampNum : (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+  // 「下一拍做什么」的策略（情绪 → 表情/动作/交接时长）在 motion-pick.js 里，
+  // 那边是纯函数、有单测。没加载时下面各处都会退回旧行为，不会白屏。
+  const pickLib = window.FishMotionPick || null;
+  if (!pickLib) console.warn("[fish] motion-pick.js 没加载，表情与动作的衔接会退回旧逻辑");
 
   const stageEl = document.getElementById("stage");
   const bubbleEl = document.getElementById("bubble");
@@ -884,6 +888,8 @@ let __applyTexQuality = null;
   let curExpr = EXPR_DEFAULT;
   let exprTimer = 0;
   let nextExprAt = 0;
+  // 最近用过的表情（末尾最新），策略层据此避开连抽同一个
+  const exprRecent = [];
   // 手写动作「伸懒腰」的曲线 —— model/mot/stretch.motion3.json 是同一份数据，
   // 只是这里由我自己按时间推（引擎的 motionManager 在这套接入里播不出来）。
   // 数值依据：Movement2 手臂抬起峰值 0.55、Param56 待机 0.44 → 举手 0.86。
@@ -1033,6 +1039,23 @@ let __applyTexQuality = null;
       if (!pool.length) pool = ["tired"];
     }
 
+    // 有策略层就交给它：情绪一次算清、表情和动作共用同一个判断，
+    // 并且会避开最近用过的两个（以前只在场景表里防重复，表情是纯随机，
+    // 偶尔会连着三次同一个表情，看着像表情卡住了）。
+    if (pickLib) {
+      const mood = pickLib.moodOf({
+        favor: pet ? pet.favor : 50,
+        hunger: pet ? pet.hunger : 100,
+        hour,
+        phase: phase,
+      });
+      const nx = pickLib.nextExpr(mood, { hour, recent: exprRecent });
+      exprRecent.push(nx.key);
+      if (exprRecent.length > 4) exprRecent.shift();
+      setExpr(nx.key, nx.hold);
+      return;
+    }
+
     const pick = pool[Math.floor(Math.random() * pool.length)];
     setExpr(pick, hold);
   }
@@ -1047,7 +1070,15 @@ let __applyTexQuality = null;
     const prev = isExpr ? __exprTrack : __act;
     // 过渡倍率只影响淡入淡出与交叉淡化，不改动作本身的节奏。
     const fs2 = TUNE.fadeScale;
-    const cross = prev ? Math.min(0.9, Math.max(0.12, Math.min(prev.dur, dur) * 0.26 + 0.06) * fs2) : 0.24 * fs2;
+    // 交接时长按「上一个动作已经演到哪儿」算：快播完的让它收尾（短交接），
+    // 刚起就被打断的要长一点（不然像抽搐）。策略在 motion-pick.handoff 里，有单测。
+    let cross;
+    if (pickLib && prev) {
+      const elapsed = (performance.now() - prev.t0) / 1000;
+      cross = pickLib.handoff(prev.dur, elapsed, dur) * fs2;
+    } else {
+      cross = prev ? Math.min(0.9, Math.max(0.12, Math.min(prev.dur, dur) * 0.26 + 0.06) * fs2) : 0.24 * fs2;
+    }
     const next = { t0: performance.now(), dur, curves, name: name || "custom", cross, speed: TUNE.motionSpeed, track: isExpr ? "expr" : "body" };
     if (isExpr) {
       if (prev) { __exprPrev = prev; __exprPrevT0 = performance.now(); }
@@ -1965,11 +1996,29 @@ let __applyTexQuality = null;
       const tbl = (window.FishMotionScenes || {});
       const list = tbl[useScene];
       if (!Array.isArray(list) || !list.length) return { ok: false, why: "no scene: " + useScene };
-      let pick = list[0];
-      if (list.length > 1) {
-        const last = actionLast[scene];
-        const pool = list.filter((x) => x !== last);
-        pick = pool[Math.floor(Math.random() * pool.length)] || list[0];
+      let pick;
+      if (pickLib) {
+        // 情绪偏置 + 最近三段防重复：以前只排掉「上一段」，
+        // 三段的小表里会来回横跳 A→B→A→B，看着像卡住。
+        const petNow = window.FishPet && window.FishPet.snapshot ? window.FishPet.snapshot() : null;
+        const mood = pickLib.moodOf({
+          favor: petNow ? petNow.favor : 50,
+          hunger: petNow ? petNow.hunger : 100,
+          hour: new Date().getHours(),
+          phase,
+        });
+        const recent = actionRecent[useScene] || (actionRecent[useScene] = []);
+        // 场景名有时带后缀（idleSoft 之类），偏置按前缀查，所以两套键都试
+        pick = pickLib.pickScene(list, { mood, recent });
+        recent.push(pick);
+        if (recent.length > 3) recent.shift();
+      } else {
+        pick = list[0];
+        if (list.length > 1) {
+          const last = actionLast[scene];
+          const pool = list.filter((x) => x !== last);
+          pick = pool[Math.floor(Math.random() * pool.length)] || list[0];
+        }
       }
       actionLast[scene] = pick;
       const lib = (window.FishMotions || {});
@@ -2232,6 +2281,8 @@ let __applyTexQuality = null;
   // 好处是每帧的值都在手里，坏处是 FadeIn/物理联动这些自己补。
   // __act 已在文件上方（CTX_MENU 附近）声明：那边要先于 BroadcastChannel 的闭包可见。
   const actionLast = {};
+  // 每个场景最近三段（末尾最新）：策略层用它避开来回横跳
+  const actionRecent = {};
   // 动作播放的补间 = 同一条 Catmull-Rom（理由见 lib/curve.js 顶部注释）。
   // 以前这里有一份自己的实现，和点击回弹那份只差零跨度兜底；现在共用一份。
   const lerpAt = curve;
@@ -2983,8 +3034,44 @@ let __applyTexQuality = null;
   // 一个人待着的时候偶尔自言自语，但别太吵。
   // 用函数声明，不用 const：tick 在上面就调它了，靠 hoisting 才安全。
   let nextIdleTalk = Date.now() + 45000 + Math.random() * 60000;
+  // 闲置词的两个开关：冒不冒气泡、出不出声。
+  // 分开是刚需——开会时只想看字不想出声，深夜只想听声音不想有东西挡屏幕。
+  // 由设置页写进设置，这里在 onSettingsChanged 里跟着更新。
+  const idleCfg = { speak: true, bubble: true };
+
+  // 说一句闲置词。三条路，按「最快」的顺序试：
+  //   ① 预合成缓存命中 → 直接播文件，延迟 0，不占合成队列；
+  //   ② 没命中但有语音 → 走正常合成（和回复同一套回落逻辑）；
+  //   ③ 不想出声 → 只冒气泡。
+  // 气泡和声音是两件事，所以这里不调 say() 一把梭：say() 只管气泡，声音单独走。
+  function sayIdle(text) {
+    const t = String(text || "").trim();
+    if (!t) return;
+    const muted = !!(window.FishVoice && window.FishVoice.isMuted && window.FishVoice.isMuted());
+    const wantVoice = idleCfg.speak && !muted && !!(window.FishVoice && (window.FishVoice.playUrl || window.FishVoice.speak));
+    if (idleCfg.bubble) say(t);
+    if (!wantVoice) return;
+    const wantCache = !!(window.deskfish && window.deskfish.idleLookup);
+    if (!wantCache) {
+      try { window.FishVoice.speak(t); } catch (e) { }
+      return;
+    }
+    window.deskfish.idleLookup(t)
+      .then((hit) => {
+        if (hit && hit.ok && hit.url) {
+          // 命中缓存：playUrl 走的是正常播放路径（口型/音量/静音/打断都一致）。
+          return window.FishVoice.playUrl(hit.url).catch(() => window.FishVoice.speak(t));
+        }
+        try { window.FishVoice.speak(t); } catch (e) { }
+        return null;
+      })
+      .catch(() => { try { window.FishVoice.speak(t); } catch (e) { } });
+  }
   function maybeIdleTalk() {
     if (Date.now() < nextIdleTalk) return;
+    // 暂停中（最小化 / 锁屏 / 游戏模式）不该主动说话：她看不见、用户也听不见，
+    // 白白唤醒一次语音合成，游戏模式里更是直接毁掉「极静」这件事。
+    if (window.__fishPausedNow && window.__fishPausedNow()) return;
     if (dshPhase === "thinking" || phase === "thinking") return;
     if (dragging) return;
     let key;
@@ -2998,7 +3085,7 @@ let __applyTexQuality = null;
       // 偶尔换成「主动搭话」那一组，不然老是同一种语气
       if (Math.random() < 0.22) key = "ping";
     }
-    say(FishLines.pick(key));
+    sayIdle(FishLines.pick(key));
     // 一个人待着时的动作：只给幅度小的那几个（想事情、叹气、歪头）。
     // 这几下不要每次都播，三次里挑一次就够，她安静坐着的时候不该一直在动。
     if (Math.random() < 0.34) {
@@ -3063,11 +3150,26 @@ let __applyTexQuality = null;
       .finally(() => { if (timer) clearTimeout(timer); });
   };
   setInterval(pollDsh, 8000);
-  window.deskfish.settingsGet().then(syncBridgeBase).catch(() => { });
+  window.deskfish.settingsGet().then(syncBridgeBase).then((s) => {
+    // 开场第一件事：把「闲置词出不出声、冒不冒气泡」读进来。
+    try {
+      if (s) {
+        if (typeof s.idleSpeak === "boolean") idleCfg.speak = s.idleSpeak;
+        if (typeof s.idleBubble === "boolean") idleCfg.bubble = s.idleBubble;
+      }
+    } catch (e) { }
+  }).catch(() => { });
 
   // 设置变了：只改渲染，不在这里反向覆盖设置本身
   window.deskfish.onSettingsChanged((s) => {
     syncBridgeBase(s);
+    // 闲置词：出声 / 气泡，两个开关随时生效，不用重启。
+    try {
+      if (s) {
+        if (typeof s.idleSpeak === "boolean") idleCfg.speak = s.idleSpeak;
+        if (typeof s.idleBubble === "boolean") idleCfg.bubble = s.idleBubble;
+      }
+    } catch (e) { }
     // 贴图精度：只有真的变了才重画。重画一次要重新缩 5 张大图，很贵，
     // 不能因为改了别的设置就顺带做一遍。
     try {

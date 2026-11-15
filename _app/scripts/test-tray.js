@@ -32,6 +32,7 @@ function make(ctxExtra) {
     quickPet: hit("quickPet"),
     setMuted: hit("muted"),
     setPaused: hit("paused"),
+    setGameMode: hit("game"),
     openSeeWatch: hit("see"),
     openProfile: hit("profile"),
     openChatLog: hit("chatlog"),
@@ -50,12 +51,12 @@ const menu = make();
 const items = menu.filter((m) => m.type !== "separator");
 const seps = menu.filter((m) => m.type === "separator");
 
-ok("顶层 16 个可点入口", items.length === 16, "实际 " + items.length);
+ok("顶层 17 个可点入口", items.length === 17, "实际 " + items.length);
 ok("分隔线 2 条", seps.length === 2, "实际 " + seps.length);
 
 const labels = items.map((m) => m.label);
 const want = ["显示 / 隐藏", "喂她一口", "摸摸头", "静音", "暂停动效（省电）",
-  "看屏幕…", "相处档案…", "对话记录…", "模型适配器…", "设置…",
+  "游戏模式（极致省性能）", "看屏幕…", "相处档案…", "对话记录…", "模型适配器…", "设置…",
   "检查更新…", "重置位置", "导出诊断包…", "打开运行日志", "再看一次新手引导", "退出"];
 ok("标签与顺序稳定", JSON.stringify(labels) === JSON.stringify(want),
   JSON.stringify(labels));

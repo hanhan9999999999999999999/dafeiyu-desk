@@ -43,6 +43,24 @@ async function readJson(req, limit) {
 
 function startServer(opts) {
   const { root, mime, log, logErr, getSettings, patchSettings, engines, notify, adapter, rvcFetch, rvcStatus } = opts;
+
+  /** 设置里的「待机自动关闭」换算成毫秒。0 = 常驻。
+   *  设置页发来 override 时用 override（它已经先写进 settings 了，这里只是同一份逻辑少读一次盘）。 */
+  function idleMsFromSettings(override) {
+    try {
+      const st = getSettings() || {};
+      const auto = override && override.auto != null
+        ? !!override.auto
+        : (st.feiyuIdleAuto !== false);
+      if (!auto) return 0;
+      const min = Number(override && override.minutes != null ? override.minutes : st.feiyuIdleMin);
+      if (!Number.isFinite(min) || min <= 0) return 0;
+      return Math.round(Math.min(720, Math.max(1, min)) * 60 * 1000);
+    } catch (e) {
+      return 10 * 60 * 1000;
+    }
+  }
+
   const srv = http.createServer((req, res) => {
     try {
       // 所有响应统一带的安全头。挂件跑在本地，真正的威胁不是远端攻击者，
@@ -115,20 +133,103 @@ function startServer(opts) {
       }
 
       // 飞鱼引擎活没活：设置页要如实告诉主人，而不是让他念一句才发现没声。
-      // 三个层次分开报，因为「装好了但没启动」和「压根没装」完全是两回事：
-      //   available=false → 目录/venv/声库缺东西，先点「一键安装」
-      //   available=true + ready=false → 装好了但引擎进程没起来（切到飞鱼说一句就会拉起来）
+      // 四个层次分开报，因为「装好了但没启动」和「压根没装」完全是两回事：
+      //   available=false → 目录/venv/声库缺东西，先点「一键安装」（missing 里写清缺哪样）
+      //   available=true + running=false → 装好了但进程没起（点「启动」，或者说一句就拉起来）
+      //   running=true + ready=false → 进程在，但模型还没进显存（正在装载 / 待机被卸了）
       //   ready=true → 引擎在跑，模型也在显存里
+      //
+      // 顺手把设置里的待机时长同步给引擎：用户改完不用重启程序，
+      // 下一次轮询（3 秒）就按新值算。
       if (url === "/engine/feiyu_status" && req.method === "GET") {
         (async () => {
           try {
             const f = await engines.feiyu();
+            if (f && f.setIdleMs) f.setIdleMs(idleMsFromSettings());
             const st = (f && f.status) ? f.status() : {};
             res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
             res.end(JSON.stringify(Object.assign({ ok: true }, st)));
           } catch (e) {
             res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
             res.end(JSON.stringify({ ok: false, available: false, ready: false, error: String(e && e.message || e) }));
+          }
+        })();
+        return;
+      }
+
+      // 一键启动引擎：把模型提前装进显存，用户点完就能立刻试听，
+      // 不用先念一句、干等二十几秒才知道到底成不成。
+      if (url === "/engine/feiyu_start" && req.method === "POST") {
+        (async () => {
+          try {
+            const body = await readJson(req).catch(() => ({}));
+            const f = await engines.feiyu();
+            if (f && f.setIdleMs) f.setIdleMs(idleMsFromSettings());
+            if (!f || !f.available || !f.available()) {
+              const miss = (f && f.missingParts) ? f.missingParts() : [];
+              throw new Error('飞鱼环境不全' + (miss.length ? '：缺 ' + miss.map((m) => m.label).join('、') : ''));
+            }
+            const st = await f.start({
+              refDir: body.refDir != null ? String(body.refDir) : (getSettings().feiyuRefDir || ""),
+            });
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+            res.end(JSON.stringify(Object.assign({ ok: true }, st)));
+          } catch (e) {
+            const msg = String(e && e.message || e);
+            log("[main] 飞鱼启动失败: " + msg);
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+            res.end(JSON.stringify({ ok: false, error: msg, available: true, running: false, ready: false }));
+          }
+        })();
+        return;
+      }
+
+      // 一键关闭引擎：立刻还显存（这是主人手动按的，不是待机，所以不走 30 秒宽限）。
+      if (url === "/engine/feiyu_stop" && req.method === "POST") {
+        (async () => {
+          try {
+            const f = await engines.feiyu();
+            if (f && f.release) f.release();
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+            res.end(JSON.stringify({ ok: true, running: false, ready: false }));
+          } catch (e) {
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: String(e && e.message || e) }));
+          }
+        })();
+        return;
+      }
+
+      // 待机时长：设置页改完立刻生效，不用重启程序。
+      if (url === "/engine/feiyu_idle" && req.method === "POST") {
+        (async () => {
+          try {
+            const body = await readJson(req).catch(() => ({}));
+            const f = await engines.feiyu();
+            const info = (f && f.setIdleMs) ? f.setIdleMs(idleMsFromSettings(body)) : null;
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+            res.end(JSON.stringify({ ok: true, idle: info }));
+          } catch (e) {
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: String(e && e.message || e) }));
+          }
+        })();
+        return;
+      }
+
+      // 检查一个飞鱼目录能不能用（用户在设置里手打路径时用）。
+      // 不改任何设置、不动任何进程，纯粹回答「这里缺什么」。
+      if (url === "/engine/feiyu_home_check" && req.method === "POST") {
+        (async () => {
+          try {
+            const body = await readJson(req).catch(() => ({}));
+            const f = await engines.feiyu();
+            const r = (f && f.checkHome) ? f.checkHome(body.dir) : { ok: false, missing: [], note: '引擎模块没加载' };
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+            res.end(JSON.stringify(Object.assign({ ok: true }, r)));
+          } catch (e) {
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: String(e && e.message || e) }));
           }
         })();
         return;
@@ -154,6 +255,10 @@ function startServer(opts) {
         (async () => {
           try {
             const body = await readJson(req);
+            // 回落账本：这次要说的话，最终是谁说的、为什么换了人。
+            // 以前只写 log，用户听到 TTS 却不知道引擎没出声 —— 他觉得「飞鱼就这声音」，
+            // 其实是压根没用上。现在跟着响应一起回给前端，由她开口说出来。
+            let fellBack = null;
 
             // ── 飞鱼（CosyVoice3）：中文原生，不卷舌 ──
             // 放在 XTTS 前面：飞鱼比 XTTS 慢一点（rtf 1.19 vs 0.31），
@@ -161,7 +266,13 @@ function startServer(opts) {
             if ((getSettings().voiceOut || "") === "feiyu") {
               try {
                 const f = await engines.feiyu();
-                if (!f.available()) throw new Error("飞鱼环境不全");
+                if (f && f.setIdleMs) f.setIdleMs(idleMsFromSettings());
+                if (!f.available()) {
+                  const miss = (f && f.missingParts) ? f.missingParts() : [];
+                  const err = new Error("飞鱼环境不全" + (miss.length ? "：缺 " + miss.map((m) => m.label).join("、") : ""));
+                  err.fallbackFrom = "feiyu";
+                  throw err;
+                }
                 const r = await f.synth(body.text, {
                   style: getSettings().feiyuStyle || "cute",
                   speed: Number(getSettings().feiyuSpeed) || 0,
@@ -186,7 +297,9 @@ function startServer(opts) {
                 }));
                 return;
               } catch (e) {
-                log("[main] 飞鱼失败，回落: " + (e && e.message || e));
+                const why = String(e && e.message || e);
+                log("[main] 飞鱼失败，回落: " + why);
+                fellBack = { from: "feiyu", reason: why };
               }
             }
 
@@ -209,7 +322,9 @@ function startServer(opts) {
                 }));
                 return;
               } catch (e) {
-                log("[main] XTTS 失败，回落 Edge: " + (e && e.message || e));
+                const why = String(e && e.message || e);
+                log("[main] XTTS 失败，回落 Edge: " + why);
+                fellBack = { from: "xtts", reason: why };
               }
             }
 
@@ -225,6 +340,8 @@ function startServer(opts) {
               cached: r.cached,
               // 实际用的音色（引擎可能回落），前端日志里带上，换声音出问题好查
               voice: r.voice || r.asked || "",
+              // 这一次有没有「本来要用 X、实际用了 Y」。null = 按设置来的，没换人。
+              fellBack,
             }));
           } catch (e) {
             res.writeHead(Number(e && e.statusCode) || 500, { "content-type": "application/json; charset=utf-8" });
@@ -413,6 +530,66 @@ function startServer(opts) {
             // 别把 String(e) 直接回给调用方：里面有完整的本机路径和堆栈。
             // 本地服务也不是人人可读的——任何网页都能用 <img> 打这个端口。
             logErr("[server] 音频读取失败: " + e);
+            res.writeHead(500, { "content-type": "text/plain; charset=utf-8" }).end("internal error");
+          }
+        })();
+        return;
+      }
+
+      // ── 闲置词缓存：预合成好的一整套台词，命中就直接播，延迟 0 ────────
+      // 路径形如 /idle/<engine>/<voice>/<hash>.mp3，段数与字符表都由
+      // idle-cache.resolveRel 校验（含路径穿越），这里不做第二套规则。
+      if (url.startsWith("/idle/") && opts.idle && typeof opts.idle.resolveRel === "function") {
+        (async () => {
+          try {
+            const rel = decodeURIComponent(url.slice("/idle/".length));
+            const f = opts.idle.resolveRel(rel);
+            if (!f) { res.writeHead(403).end("forbidden"); return; }
+            if (!fs.existsSync(f)) { res.writeHead(404).end("not found"); return; }
+            const stat = fs.statSync(f);
+            if (!stat.isFile()) { res.writeHead(404).end("not found"); return; }
+            const total = stat.size;
+            const type = f.endsWith(".mp3") ? "audio/mpeg" : "audio/wav";
+            const range = req.headers.range;
+            const m = range && /^bytes=(\d*)-(\d*)$/.exec(String(range).trim());
+            if (m) {
+              let start = m[1] === "" ? null : Number(m[1]);
+              let end = m[2] === "" ? null : Number(m[2]);
+              if (start === null && end === null) {
+                res.writeHead(416, { "content-range": "bytes */" + total }).end();
+                return;
+              }
+              if (start === null) {
+                start = Math.max(0, total - end);
+                end = total - 1;
+              } else if (end === null || end >= total) {
+                end = total - 1;
+              }
+              if (start > end || start >= total) {
+                res.writeHead(416, { "content-range": "bytes */" + total }).end();
+                return;
+              }
+              res.writeHead(206, {
+                "content-type": type,
+                "content-length": end - start + 1,
+                "content-range": "bytes " + start + "-" + end + "/" + total,
+                "accept-ranges": "bytes",
+                // 不缓存到磁盘：缓存文件本身会随重新合成而变，浏览器留旧的就会播错句。
+                "cache-control": "no-store",
+              });
+              fs.createReadStream(f, { start, end }).pipe(res);
+              return;
+            }
+            const buf = fs.readFileSync(f);
+            res.writeHead(200, {
+              "content-type": type,
+              "content-length": buf.length,
+              "accept-ranges": "bytes",
+              "cache-control": "no-store",
+            });
+            res.end(buf);
+          } catch (e) {
+            logErr("[server] 闲置词音频读取失败: " + e);
             res.writeHead(500, { "content-type": "text/plain; charset=utf-8" }).end("internal error");
           }
         })();

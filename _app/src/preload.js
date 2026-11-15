@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld("deskfish", {
   miniStatus: () => ipcRenderer.invoke("mini:status"),
   miniStart: () => ipcRenderer.invoke("mini:start"),
   miniStop: () => ipcRenderer.invoke("mini:stop"),
+  // 一键把「能说话」这条链弄通（外部桥 → 自带桥 → 指向它 → 再探一次）
+  bridgeEnsure: (opt) => ipcRenderer.invoke("bridge:ensure", opt || {}),
   rvcStatus: () => ipcRenderer.invoke("rvc:status"),
   rvcStart: () => ipcRenderer.invoke("rvc:start"),
   rvcStop: () => ipcRenderer.invoke("rvc:stop"),
@@ -168,6 +170,32 @@ contextBridge.exposeInMainWorld("deskfish", {
   updateOpen: (url) => ipcRenderer.invoke("update:open", url),
   privacyRead: () => ipcRenderer.invoke("privacy:read"),
   diagExport: () => ipcRenderer.invoke("diag:export"),
+  // 一键体检：把「能说话」这条链从头到尾走一遍，返回逐项结论 + 报告路径
+  diagRun: () => ipcRenderer.invoke("diag:run"),
+  diagLast: () => ipcRenderer.invoke("diag:last"),
+  diagOpenLatest: () => ipcRenderer.invoke("diag:openLatest"),
+  // 闲置词：状态 / 预合成 / 停下 / 清空 / 命中查询 / 打开缓存目录。
+  // 触发时先 lookup，命中了直接播本地文件（0 延迟），没命中才走正常合成。
+  idleStatus: () => ipcRenderer.invoke("idle:status"),
+  idleBuild: () => ipcRenderer.invoke("idle:build"),
+  idleCancel: () => ipcRenderer.invoke("idle:cancel"),
+  idleClear: (opt) => ipcRenderer.invoke("idle:clear", opt || {}),
+  idleLookup: (text) => ipcRenderer.invoke("idle:lookup", { text: String(text || "") }),
+  idleOpen: () => ipcRenderer.invoke("idle:open"),
+  onIdleProgress: (fn) => {
+    if (typeof fn !== "function") return () => { };
+    const h = (_e, payload) => { try { fn(payload); } catch (e) { } };
+    ipcRenderer.on("idle:progress", h);
+    return () => { try { ipcRenderer.removeListener("idle:progress", h); } catch (e) { } };
+  },
+  // 游戏模式：进去就藏起来、停渲染、把显存还掉；托盘或热键把状态翻回来
+  gameSet: (on) => ipcRenderer.invoke("game:set", !!on),
+  gameStatus: () => ipcRenderer.invoke("game:status"),
+  onGameMode: (fn) => {
+    const h = (_e, on) => { try { fn(!!on); } catch (e) { } };
+    ipcRenderer.on("app:game-mode", h);
+    return () => ipcRenderer.removeListener("app:game-mode", h);
+  },
 
   // 渲染进程把「刚才失败了」报给主进程：那几个状态只活在内存里，重启就没了，
   // 而用户报障基本都是「刚才不行，现在已经重启了」。

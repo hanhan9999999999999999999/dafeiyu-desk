@@ -651,6 +651,65 @@
       b.appendChild(n);
       badgeEl.appendChild(b);
     }
+    renderCompat(rep);
+  }
+
+  // 兼容性小结：把 compat.js 算出来的结论摊开给人看。
+  // 只写结论不够——用户真正要的是「缺了会怎样」，所以每行都写成人话。
+  // 槽位的中文名：这张表和 core-params 规则里的字段标签是同一套语义，
+  // 报告里写「笑眼」比写 eyeSmile 有用得多。
+  const CANON_LABEL = {
+    angleX: "左右转头", angleY: "上下点头", angleZ: "歪头",
+    bodyAngleX: "身体左右转", bodyAngleZ: "身体侧倾",
+    eyeBallX: "眼珠左右", eyeBallY: "眼珠上下",
+    eyeLOpen: "左眼开合", eyeROpen: "右眼开合",
+    mouthOpen: "张嘴", mouthForm: "嘴角", breath: "呼吸",
+    eyeSmile: "笑眼", browLY: "左眉高低", browRY: "右眉高低",
+    browLAngle: "左眉角度", browRAngle: "右眉角度", browInnerUp: "眉心上挑",
+    shockL: "左眼震动", shockR: "右眼震动", cryL: "左眼泪", cryR: "右眼泪",
+    angry: "生气纹", pupilX: "瞳孔左右", mouthPucker: "撇嘴", cheekPuff: "鼓腮",
+  };
+
+  function renderCompat(rep) {
+    const box = document.getElementById("compat");
+    const body = document.getElementById("compatBody");
+    const lv = document.getElementById("compatLv");
+    const t = document.getElementById("compatT");
+    const sc = document.getElementById("compatScore");
+    if (!box || !body) return;
+    const c = rep && rep.compat;
+    if (!c) { box.style.display = "none"; return; }
+    box.style.display = "";
+    const cls = c.level === "full" ? "f" : c.level === "good" ? "g" : c.level === "ok" ? "o" : "b";
+    lv.className = "bak " + cls;
+    lv.textContent = c.levelText || c.level || "—";
+    t.textContent = "这个模型能演到什么程度";
+    sc.textContent = "兼容分 " + (c.score || 0) + "/100";
+    body.innerHTML = "";
+    const row = (k, v, cls2) => {
+      const r = el("div", "crow" + (cls2 ? " " + cls2 : ""));
+      r.appendChild(el("span", "k", k));
+      r.appendChild(el("span", "v", v));
+      body.appendChild(r);
+    };
+    // 名称表：参数槽的 id → 中文名，报告里直接写中文更好读
+    const nameOf = (id) => (CANON_LABEL[id] || id);
+    const total = (rep.params || []).length;
+    row("接上", (c.score ? "" : "") + (Object.keys(rep.guesses && rep.guesses.params || {}).length) + " 个语义槽 / 模型共 " + total + " 个参数");
+    if (c.missing && c.missing.length) {
+      row("缺", c.missing.slice(0, 8).map(nameOf).join("、") + (c.missing.length > 8 ? " 等 " + c.missing.length + " 项" : ""), "miss");
+    }
+    if (c.proxied && c.proxied.length) {
+      row("替身", c.proxied.map((p) => nameOf(p.slot) + "←" + p.via.map(nameOf).join("/")).join("；"), "prox");
+    }
+    if (c.sideShared && c.sideShared.length) {
+      row("共用", c.sideShared.map(nameOf).join("、") + "（模型只有一个参数，左右一起动）");
+    }
+    const exGot = Object.keys((rep.guesses && rep.guesses.expressions) || {}).filter((k) => rep.guesses.expressions[k]).length;
+    row("表情", exGot + " / 7 种情绪有对应表情" + (exGot < 7 ? "，少的那些用参数曲线凑" : ""));
+    if (c.missing && c.missing.length > 12) {
+      row("说明", "缺的槽会在「核心参数」里留空，不猜。留空比猜错好：猜错是悄悄写错参数，你会以为模型坏了。");
+    }
   }
 
   // 点一下 chip 只有 toast，眼睛还停留在原来的 chip 上，不知道刚才点的是哪个。

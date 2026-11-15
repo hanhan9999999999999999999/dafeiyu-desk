@@ -297,6 +297,130 @@ function miniStatus() {
   };
 }
 
+// ── 桥接自愈（1.5.0）──────────────────────────────────────────────
+// 要解决的问题：用户下下来、机器上有 DSH 但没有 phone-bridge 时，
+// 以前只有「开机探一次」，探完就把 bridgeUrl 留在 8899 那个死端口上；
+// 自带迷你桥在 8898 起来了却没人指过去，于是她说「桥接没连上」，
+// 用户以为自己装错了。现在这一整段负责把三件事收干净：
+//   ① 外部桥能用就用外部桥（用户配的真实地址一律尊重）；
+//   ② 外部桥不通就起自带迷你桥，并把它活着这件事一直看着（进程死了自动重拉）；
+//   ③ 只有在 bridgeUrl 指着「本机上的死端口」时才改成本机迷你桥，
+//      远端地址（用户自己家里的机器）一律不动，只在诊断里说清楚。
+let miniRestarts = 0;
+let miniRestartTimer = null;
+let bridgeWatchTimer = null;
+let appQuitting = false;
+const MINI_BACKOFF = [1500, 4000, 10000, 30000, 60000];
+const MINI_RESTART_WINDOW = 10 * 60 * 1000;
+let miniRestartStamps = [];
+
+function isLoopbackUrl(u) {
+  try {
+    const h = new URL(String(u)).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    return h === "127.0.0.1" || h === "localhost" || h === "::1" || h === "0.0.0.0";
+  } catch (e) {
+    return false;
+  }
+}
+
+// 把 bridgeUrl 指到自带桥。只有「本机地址」才动，远端配置原样留着。
+function bridgePointToMini() {
+  const miniUrl = "http://127.0.0.1:" + MINI_PORT;
+  try {
+    const cur = String(S.get().bridgeUrl || "").trim() || BRIDGE_DEFAULT;
+    if (cur.replace(/\/+$/, "") === miniUrl) return miniUrl;
+    if (!isLoopbackUrl(cur)) {
+      log("[bridge] 桥接地址不是本机（" + cur + "），按用户的配置来，不改");
+      return cur;
+    }
+    S.patch({ bridgeUrl: miniUrl });
+    log("[bridge] 外部桥不通，bridgeUrl 已改指自带桥 " + miniUrl);
+    try { win && win.webContents.send("settings-changed", S.get()); } catch (e) { }
+    return miniUrl;
+  } catch (e) {
+    return bridgeBase();
+  }
+}
+
+// 迷你桥挂了要不要重拉：只在「确实需要桥」的时候拉，并且限速，
+// 免得脚本本身坏了以后每 1.5 秒重启一次把 CPU 烧掉。
+function miniScheduleRestart(why) {
+  if (miniRestartTimer) return;
+  if ((S.get().replyMode || "dsh") !== "dsh") return;
+  if (appQuitting) return;
+  const now = Date.now();
+  miniRestartStamps = miniRestartStamps.filter((t) => now - t < MINI_RESTART_WINDOW);
+  if (miniRestartStamps.length >= 6) {
+    miniLastError = "桥接反复退出（10 分钟内 " + miniRestartStamps.length + " 次），先停手：" + (why || "");
+    log("[bridge!] " + miniLastError);
+    return;
+  }
+  const wait = MINI_BACKOFF[Math.min(miniRestarts, MINI_BACKOFF.length - 1)];
+  miniRestarts += 1;
+  miniRestartStamps.push(now);
+  log("[bridge] 迷你桥不在了（" + (why || "未知") + "），" + Math.round(wait / 1000) + " 秒后重拉（第 " + miniRestarts + " 次）");
+  miniRestartTimer = setTimeout(() => {
+    miniRestartTimer = null;
+    miniStart()
+      .then((st) => { if (st && st.running) bridgePointToMini(); })
+      .catch((e) => log("[bridge!] 重拉失败: " + e));
+  }, wait);
+}
+
+// 一句话版：保证「现在能说话」。诊断页和开机都调它。
+// opt.force = 不等退避，立刻起（用户点了「一键修复」）。
+async function bridgeEnsure(opt) {
+  const o = opt || {};
+  const mode = S.get().replyMode || "dsh";
+  const out = {
+    ok: false,
+    mode,
+    base: bridgeBase(),
+    external: false,
+    mini: miniStatus(),
+    switched: false,
+    note: "",
+  };
+  if (mode !== "dsh") {
+    out.ok = true;
+    out.note = "回复来源不是 DSH（当前「" + mode + "」），不需要桥接";
+    return out;
+  }
+  try {
+    if (await probeBridge()) {
+      out.ok = true;
+      out.external = true;
+      out.base = bridgeBase();
+      out.note = "外部桥接在跑：" + out.base;
+      return out;
+    }
+  } catch (e) { }
+  // 外部不在。自带桥已经在跑就直接用它。
+  let st = miniStatus();
+  if (!st.running) {
+    if (o.force) {
+      miniRestartTimer && clearTimeout(miniRestartTimer);
+      miniRestartTimer = null;
+    }
+    st = await miniStart();
+  }
+  out.mini = st;
+  if (!st.running) {
+    out.note = "自带桥接也起不来：" + (st.error || "原因不明");
+    return out;
+  }
+  const before = String(S.get().bridgeUrl || "").trim() || BRIDGE_DEFAULT;
+  out.base = bridgePointToMini();
+  out.switched = out.base !== before.replace(/\/+$/, "");
+  // 起完再探一次：进程起来了但端口还没通也算没通，别对用户报喜。
+  const ok = await probeBridge().catch(() => false);
+  out.ok = !!ok;
+  out.note = ok
+    ? (out.switched ? "外部桥没在跑，已自动改用自带桥接：" + out.base : "用自带桥接：" + out.base)
+    : "自带桥接进程在，但 " + out.base + " 还没答话";
+  return out;
+}
+
 // 桥接地址只补空，不改用户填的值。
 // 以前这里会无条件把地址拽到自带迷你桥接的 8898：用户明明配了 phone-bridge（8899），
 // 一开机又被改回一个没人的端口，报错看着像配置错，其实是地址被改掉了。
@@ -401,6 +525,8 @@ async function miniStart() {
     miniProc.on("close", (code) => {
       if (code !== 0) miniLastError = "桥接退出（code=" + code + "）";
       miniProc = null;
+      // 不是我们主动关的（退出时 miniStop 会先置 appQuitting），就安排一次重拉。
+      miniScheduleRestart("exit code=" + code);
     });
     log("[main] 自带桥接已启动，端口 " + MINI_PORT);
     miniFixBridgeUrl();
@@ -427,6 +553,9 @@ function miniStop() {
 ipcMain.handle("mini:status", async () => miniStatus());
 ipcMain.handle("mini:start", async () => miniStart());
 ipcMain.handle("mini:stop", async () => miniStop());
+// 一键把「能说话」这条链弄通：外部桥不通就起自带桥，指过去，再探一次。
+// 设置页「诊断」和连接页都走这一个入口，别再各自拼一套逻辑。
+ipcMain.handle("bridge:ensure", async (_e, opt) => bridgeEnsure(opt));
 ipcMain.handle("rvc:status", async () => {
   const st = rvcStatus();
   // 顺带把服务自己的 /health 带回来——自动转换进度在里面（convert 字段）。
@@ -756,6 +885,20 @@ ipcMain.on("renderer:error", (e, info) => {
 const { Settings, DEFAULTS } = require("./settings");
 const { buildWindowMenu } = require("./window-menu");
 const { buildTrayMenu } = require("./tray-menu");
+const { createIdleCache } = require("./idle-cache");
+// 台词池本身：主进程要拿它算「一共多少句闲置词」，设置页要按清单显示进度。
+// lines.js 同时挂着 window.FishLines（渲染进程）和 module.exports（这里）。
+const Lines = require("./lines");
+
+// 闲置词语音缓存：目录放在 userData 下（跟语音缓存 cacheDir 分开，
+// 这里是「预合成好的一套台词」，不该被 TTS 的 LRU 清掉）。
+// base 是延迟取的：创建时服务还没起，端口要等 bootServer() 才有。
+const IDLE_CACHE = createIdleCache({
+  root: path.join(app.getPath("userData"), "idle-cache"),
+  base: () => "http://127.0.0.1:" + (PORT || 0),
+  log: (m) => log(m),
+});
+
 
 const APP_NAME = "大肥鱼";
 const BASE_W = 460;
@@ -879,6 +1022,9 @@ async function bootServer() {
     rvcStatus,
     // 模型包接口 + /packs/<id>/* 静态文件
     adapter: ADAPTER,
+    // 闲置词的预合成缓存：服务端只负责按白名单把文件发出去（带 Range），
+    // 目录与命名规则全在 idle-cache.js 里，两边不做各自的判断。
+    idle: IDLE_CACHE,
     // 服务端拿不到窗口对象，用回调把「在等声音」这种提示送回渲染层。
     notify: (channel, payload) => {
       try {
@@ -964,6 +1110,71 @@ function setPauseReason(reason, on) {
   return pauseReasons.size > 0;
 }
 function isRenderPaused() { return pauseReasons.size > 0; }
+
+// ── 游戏模式（1.5.0）───────────────────────────────────────────────
+// 玩家要的就一件事：别跟我抢帧。所以这里不是「把帧率降到 15」，是整条渲染停下来，
+// 顺带把最贵的那两样也放掉 —— 飞鱼模型常驻显存（约 8GB）和看屏幕的定时截图。
+// 她还在（托盘里、热键按一下就叫回来），只是不出声不占资源。
+// 用 pauseReasons 加一条而不是直接 pauseRender：撤的时候不会把「最小化」那份暂停一起放开。
+let gamePrev = null;
+
+function gameStatus() {
+  return {
+    on: !!(S && S.get && S.get().gameMode),
+    hidden: !!(win && !win.isDestroyed() && !win.isVisible()),
+    releasedVram: !!(gamePrev && gamePrev.releasedVram),
+  };
+}
+
+async function setGameMode(on) {
+  const want = !!on;
+  if (!!(S && S.get && S.get().gameMode) === want) return { ok: true, ...gameStatus() };
+
+  if (want) {
+    gamePrev = { seeRunning: !!seeRunning, releasedVram: false };
+    // ① 显存放回去：飞鱼一常驻就是好几个 G，玩游戏时最不该被它占着。
+    //    不担心下次开口慢 —— 她本来就在 idle 释放里做同一件事，张开嘴会自动装回来。
+    try {
+      const f = await engineFeiyu();
+      if (f && typeof f.release === "function") {
+        await f.release();
+        gamePrev.releasedVram = true;
+      }
+    } catch (e) { log("[game] 释放语音模型失败（不影响进入游戏模式）: " + e); }
+    // ② 看屏幕：定时截图 + 调模型，是后台最贵的一件事，先停
+    try { if (seeRunning) seeStop(false); } catch (e) { }
+    // ③ 渲染整条停（ticker.stop），不是降帧
+    setPauseReason("game", true);
+    // ④ 藏起来，并且不进任务栏 / Alt-Tab —— 否则玩家切窗口会被她闪一下
+    if (win && !win.isDestroyed()) {
+      try { win.setSkipTaskbar(true); win.hide(); } catch (e) { }
+    }
+  } else {
+    setPauseReason("game", false);
+    if (win && !win.isDestroyed()) {
+      try {
+        win.setSkipTaskbar(false);
+        win.show();
+        win.focus();
+      } catch (e) { }
+    }
+    // 看屏幕按原来的开关恢复：他本来开着才恢复，本来关着就别自作主张打开
+    try { if (gamePrev && gamePrev.seeRunning) openSeeWatch(); } catch (e) { }
+    gamePrev = null;
+  }
+
+  S.patch({ gameMode: want });
+  try {
+    if (tray) tray.setToolTip(want ? APP_NAME + " · 游戏模式（托盘里点「退出游戏模式」回来）" : APP_NAME);
+  } catch (e) { }
+  refreshTrayMenu();
+  try {
+    if (win && win.webContents && !win.webContents.isDestroyed()) win.webContents.send("app:game-mode", want);
+  } catch (e) { }
+  log("[game] " + (want ? "进入" : "退出") + "游戏模式");
+  return { ok: true, ...gameStatus() };
+}
+
 
 // 用窗口当前所在的那块屏，而不是死认主屏——双屏下"回到右下角"
 // 应该回到她待着的那块屏的右下角。
@@ -1450,6 +1661,12 @@ function migrateLegacyViewBox() {
 
 function applySettings(patch) {
   const s = S.get();
+
+  // 引擎或音色换了之后，闲置词的缓存就换了「债主」：开了「自动补」的话在这里排队补一次。
+  // 必须放在窗口判空之前——设置窗口里改完引擎，主窗口可能正被收在托盘里。
+  if (patch && (("voiceOut" in patch) || ("voiceId" in patch) || ("feiyuStyle" in patch) || ("rvcModel" in patch))) {
+    try { idleAutoMaybeBuild("换引擎或音色"); } catch (e) { log("[idle] 自动补排队失败: " + String((e && e.message) || e)); }
+  }
 
   if (!win || win.isDestroyed()) return;
 
@@ -1969,6 +2186,11 @@ let skippedAccels = [];
 const STRETCH_ACCEL = "CommandOrControl+Alt+S";
 
 function summonDock() {
+  // 游戏模式下按唤出热键 = 「把她叫回来」：先退出游戏模式，再照常叫出输入条。
+  if (S && S.get && S.get().gameMode) {
+    setGameMode(false).then(() => { try { summonDock(); } catch (e) { } }).catch(() => { });
+    return;
+  }
   try {
     if (!win) { createWindow(); return; }
     if (win.isMinimized()) win.restore();
@@ -2917,6 +3139,8 @@ function trayTemplate() {
     foods: TRAY_FOODS,
     settings: st,
     paused: pauseReasons.has("manual"),
+    gameMode: !!st.gameMode,
+    setGameMode: (on) => { setGameMode(!!on); },
     updateAvailable: updateAvailable,
     toggleWindow: toggleMainWindow,
     quickPet,
@@ -3948,6 +4172,432 @@ async function exportDiag(dirOverride) {
 
 ipcMain.handle("diag:export", () => exportDiag());
 
+// ── 一键体检（1.5.0）──────────────────────────────────────────────
+// 用户说「她不说话了 / 打不开 / 很卡」时，以前只能让他把整包诊断发过来，
+// 修的人再翻 2MB 日志找那一行。现在点一下，这里把「能说话」这条链从头走一遍：
+// 每一项给一句话结论（好 / 注意 / 坏了 / 跳过），同时落两份详细报告
+// （.md 给人看、.json 给接手的 AI 看），坏在哪一格能直接定位。
+// 原则：体检只读不写用户数据，也不偷偷改设置 —— 只有「一键修复」按钮才会动手。
+let diagLast = null;
+
+function diagStamp() {
+  const d = new Date();
+  const p = (n) => (n < 10 ? "0" + n : String(n));
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+}
+
+async function diagRun() {
+  const t0 = Date.now();
+  const items = [];
+  const push = (id, label, status, detail, hint, fix) => items.push({
+    id, label, status, detail: detail || "", hint: hint || "", fix: fix || "",
+  });
+  const s = S.get();
+
+  // 1 程序本身：配置目录写得进去吗（写不进去，后面所有设置都存不住）
+  let canWrite = false;
+  try {
+    const p = path.join(app.getPath("userData"), ".diag-write-test");
+    fs.writeFileSync(p, "1");
+    fs.unlinkSync(p);
+    canWrite = true;
+  } catch (e) { }
+  push("app", "程序本身", canWrite ? "ok" : "bad",
+    "版本 " + app.getVersion() + " · " + (app.isPackaged ? "安装版" : "开发模式") + " · Electron " + process.versions.electron,
+    canWrite ? "" : "配置目录写不进去（权限或磁盘满）—— 设置、对话、缓存都会存不下来");
+
+  // 2 设置项：缺键不致命（sanitize 会补默认），但说明配置被旧版本写过
+  let DEFAULTS = {};
+  try { DEFAULTS = require("./settings").DEFAULTS || {}; } catch (e) { }
+  const missing = Object.keys(DEFAULTS).filter((k) => !(k in s));
+  push("settings", "设置项", missing.length ? "warn" : "ok",
+    "共 " + Object.keys(s).length + " 项" + (missing.length ? "，缺 " + missing.length + " 项" : ""),
+    missing.length ? "缺的按默认值跑：" + missing.join("、") : "");
+
+  // 3 本地服务：语音、模型文件、健康检查全走它
+  let listening = false;
+  try { listening = !!(server && server.listening); } catch (e) { }
+  push("server", "本地服务", listening ? "ok" : "bad",
+    listening ? "端口 " + PORT : "没在监听",
+    listening ? "" : "语音合成和模型文件都靠它；重开程序一般能好，一直不好多半是端口被占");
+
+  // 4 和 DSH 的连接（顺带把桥接弄通：这一步是「会修」的，不只是「会看」）
+  let bridge = { ok: false, note: "", base: "", external: false };
+  try { bridge = await bridgeEnsure({ quiet: true }); } catch (e) { bridge = { ok: false, note: String((e && e.message) || e) }; }
+  push("bridge", "和 DSH 的连接", bridge.ok ? "ok" : "bad",
+    (bridge.external ? "外部桥 " : "自带桥 ") + (bridge.base || "未建立"),
+    bridge.ok ? "" : (bridge.note || "连不上") + " —— 她现在还能用内置声音说话，但不会回答你的话",
+    bridge.ok ? "" : "bridge");
+
+  // 5 内置语音：真打一次 /engine/voices，不看代码猜
+  let voices = null;
+  try {
+    const ctl = new AbortController();
+    const tm = setTimeout(() => ctl.abort(), 5000);
+    const r = await fetch("http://127.0.0.1:" + PORT + "/engine/voices", { signal: ctl.signal, cache: "no-store" });
+    clearTimeout(tm);
+    if (r && r.ok) voices = await r.json();
+  } catch (e) { }
+  const vCount = Array.isArray(voices) ? voices.length : (voices && Array.isArray(voices.voices) ? voices.voices.length : 0);
+  push("tts", "内置语音", vCount > 0 ? "ok" : "bad",
+    vCount ? vCount + " 个音色可用" : "列不出音色",
+    vCount ? "" : "内置 TTS 都出不来声音的话，是最后一道保险失效了；把这份报告发出去");
+
+  // 6 飞鱼：环境齐不齐、在不在跑
+  try {
+    const f = await engineFeiyu();
+    const st = (f && typeof f.status === "function") ? f.status() : {};
+    const miss = (f && typeof f.missingParts === "function") ? f.missingParts() : [];
+    if (st && st.ready) {
+      push("feiyu", "飞鱼引擎", "ok", "在跑 · " + (st.device || "?") + " · 风格 " + (st.style || s.feiyuStyle || "cute"));
+    } else if (miss && miss.length) {
+      push("feiyu", "飞鱼引擎", "warn", "环境不全，缺 " + miss.length + " 项",
+        "缺：" + miss.map((x) => x.label).join("、") + " —— 在「声音与行为 → 变声引擎」点一键安装；没装也照样能用内置 TTS", "feiyu");
+    } else {
+      push("feiyu", "飞鱼引擎", "ok", "环境齐了，现在没加载（下次开口会自动装进显存）");
+    }
+  } catch (e) {
+    push("feiyu", "飞鱼引擎", "warn", "读不到状态：" + String((e && e.message) || e), "不影响说话，只是用不上这个声线");
+  }
+
+  // 7 XTTS / 8 RVC / 9 识别模型：这三个都是可选的，坏了只影响对应功能
+  try {
+    const x = await xttsSetupStatus();
+    push("xtts", "XTTS 克隆", x && x.installed ? "ok" : "skip",
+      x && x.installed ? "环境已装好" : "没装（可选项）",
+      x && x.installed ? "" : "要用克隆声线才需要装，装了会占约 3GB");
+  } catch (e) {
+    push("xtts", "XTTS 克隆", "skip", "没装或读不到（可选项）", "");
+  }
+  try {
+    const rv = rvcStatus();
+    push("rvc", "RVC 变声", rv && rv.running ? "ok" : "skip",
+      rv && rv.running ? "转换服务在跑" : "没在跑（可选项）",
+      rv && rv.running ? "" : "只有「声音与行为 → 变声引擎」选了 RVC 才需要它");
+  } catch (e) {
+    push("rvc", "RVC 变声", "skip", "读不到状态（可选项）", "");
+  }
+  try {
+    const m = await engineAsr();
+    const st = (m && typeof m.turboState === "function") ? m.turboState() : {};
+    push("asr", "语音识别", st && st.present ? "ok" : "skip",
+      st && st.present ? "识别模型在" : "识别模型没下（可选项）",
+      st && st.present ? "" : "按住说话要它；在「声音与行为 → 听与说」点下载");
+  } catch (e) {
+    push("asr", "语音识别", "skip", "读不到状态（可选项）", "");
+  }
+
+  // 10 模型文件：没有模型窗口就是空的
+  try {
+    const mdir = path.join(RES_ROOT, "DeepSeek Live2D Model");
+    const has = fs.existsSync(mdir);
+    push("model", "模型文件", has ? "ok" : "bad",
+      has ? "内置模型在" : "找不到内置模型目录",
+      has ? "" : "重装一次，或在「连接与模型 → 模型适配器」里导入一个模型", has ? "" : "model");
+  } catch (e) { }
+
+  // 11 窗口位置：跑出屏幕是「打开了但看不见」最常见的原因
+  try {
+    const ds = screen.getAllDisplays();
+    let where = "窗口没开";
+    let inside = false;
+    if (win && !win.isDestroyed()) {
+      const b = win.getBounds();
+      inside = ds.some((d) => {
+        const w = d.workArea;
+        return b.x + b.width > w.x && b.x < w.x + w.width && b.y + b.height > w.y && b.y < w.y + w.height;
+      });
+      where = "窗口 " + b.width + "×" + b.height + " @(" + b.x + "," + b.y + ")";
+    }
+    push("window", "窗口位置", inside ? "ok" : "warn", ds.length + " 块屏 · " + where,
+      inside ? "" : "窗口在屏幕外面（换了显示器就会这样）：托盘 → 重置位置");
+  } catch (e) { }
+
+  // 12 快捷键：填了但被别的软件占了，是「按了没反应」的常见原因
+  try {
+    const bound = boundAccels.slice();
+    const want = [s.hotkeySummon, s.hotkeyMic, s.hotkeyMute].filter(Boolean);
+    const lost = want.filter((k) => bound.indexOf(k) < 0);
+    push("hotkey", "快捷键", lost.length ? "warn" : "ok",
+      bound.length + " 个已注册" + (lost.length ? "，" + lost.length + " 个没占上" : ""),
+      lost.length ? "没占上：" + lost.join("、") + "（被别的软件用了，换一个就行）" : "");
+  } catch (e) { }
+
+  // 13 磁盘：语音缓存和模型都很占地方，满了会表现成「说话没声音」
+  try {
+    const sd = storageDirs();
+    const st = fs.statfsSync(sd.data);
+    const freeGB = Math.round((st.bsize * st.bavail) / 1073741824 * 10) / 10;
+    const cache = dirSize(path.join(sd.data, "tts"));
+    push("disk", "磁盘空间", freeGB < 1 ? "bad" : (freeGB < 5 ? "warn" : "ok"),
+      "剩 " + freeGB + " GB · 语音缓存 " + Math.round(cache.bytes / 1048576) + " MB",
+      freeGB < 1 ? "磁盘满了：语音缓存写不进去，会变成「没声音」" : (freeGB < 5 ? "空间偏紧，模型和缓存都还要长" : ""),
+      freeGB < 5 ? "storage" : "");
+  } catch (e) { }
+
+  // 14 最近有没有反复出错（这一格是「她已经出过事」的直接证据）
+  try {
+    const list = faultRing.slice(-40);
+    const bad = list.filter((x) => x && x.kind && x.kind !== "info");
+    const kinds = {};
+    for (const x of bad) kinds[x.kind] = (kinds[x.kind] || 0) + 1;
+    const top = Object.keys(kinds).sort((a, b) => kinds[b] - kinds[a]).slice(0, 3)
+      .map((k) => k + "×" + kinds[k]).join("、");
+    push("faults", "最近的故障", bad.length ? "warn" : "ok",
+      bad.length ? "记到 " + bad.length + " 条" : "这一次运行没记到故障",
+      bad.length ? "最多的是：" + top + "（详细内容在报告末尾）" : "");
+  } catch (e) { }
+
+  // ── 落两份报告 ──
+  const summary = { ok: 0, warn: 0, bad: 0, skip: 0 };
+  for (const it of items) summary[it.status] = (summary[it.status] || 0) + 1;
+  const score = summary.bad ? "bad" : (summary.warn ? "warn" : "ok");
+  const head = summary.bad
+    ? "有 " + summary.bad + " 处坏了，照下面的「怎么办」逐条处理"
+    : (summary.warn ? summary.warn + " 处需要注意，不影响基本使用" : "整条链都通");
+
+  let mdPath = "";
+  let jsonPath = "";
+  try {
+    const dir = path.join(app.getPath("userData"), "diag");
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = diagStamp();
+    mdPath = path.join(dir, "诊断报告-" + stamp + ".md");
+    jsonPath = path.join(dir, "诊断报告-" + stamp + ".json");
+    const icon = { ok: "✅", warn: "⚠️", bad: "❌", skip: "·" };
+    const lines = [
+      "# 大肥鱼体检报告",
+      "",
+      "生成时间：" + new Date().toLocaleString("zh-CN"),
+      "结论：" + head + "（好 " + summary.ok + " · 注意 " + summary.warn + " · 坏 " + summary.bad + " · 跳过 " + summary.skip + "）",
+      "耗时：" + (Date.now() - t0) + " ms",
+      "",
+      "## 逐项结果",
+      "",
+      "| | 项目 | 状态 | 说明 |",
+      "|---|---|---|---|",
+      ...items.map((it) => "| " + icon[it.status] + " | " + it.label + " | " + it.status + " | " +
+        String(it.detail || "").replace(/\|/g, "/") + " |"),
+      "",
+      "## 需要处理的",
+      "",
+      ...(items.filter((it) => it.hint).length
+        ? items.filter((it) => it.hint).map((it) => "- **" + it.label + "**：" + it.hint)
+        : ["- 没有。"]),
+      "",
+      "## 系统与运行环境",
+      "",
+      "```",
+      "版本: " + app.getVersion(),
+      "运行形态: " + (app.isPackaged ? "安装版" : "开发模式"),
+      "Electron: " + process.versions.electron + " / Chromium " + process.versions.chrome + " / Node " + process.versions.node,
+      "系统: " + os.type() + " " + os.release() + " (" + process.arch + ")",
+      "CPU: " + (() => { try { const c = os.cpus(); return c && c.length ? c[0].model + " ×" + c.length : "未知"; } catch (e) { return "未知"; } })(),
+      "内存: " + (Math.round((os.totalmem() / 1073741824) * 10) / 10) + " GB",
+      "userData: " + app.getPath("userData"),
+      "数据目录: " + storageDirs().data,
+      "模型目录: " + storageDirs().models,
+      "语音引擎: " + (s.voiceOut || "tts") + " · 音色 " + (s.voiceId || "默认") + " · 预热 " + (s.voiceWarm ? "开" : "关"),
+      "飞鱼目录: " + (s.feiyuHome || "（自动找）") + " · 闲置释放 " + (s.feiyuIdleAuto === false ? "关" : (s.feiyuIdleMin || 10) + " 分钟"),
+      "桥接地址: " + (s.bridgeUrl || "") + " · 回复来源: " + (s.replyMode || "dsh"),
+      "```",
+      "",
+      "## 最近故障（原始记录）",
+      "",
+      "```",
+      (faultText() || "").slice(0, 8000),
+      "```",
+      "",
+      "## 给接手的 AI / 开发者",
+      "",
+      "1. 带 bad 的那几项就是「现在为什么不能用」的直接原因，按 `fix` 字段能定位到对应模块：",
+      "   `bridge` → main.js 的 bridgeEnsure/miniStart；`feiyu` → engine/feiyu.mjs + /engine/feiyu_*；",
+      "   `model` → RES_ROOT/DeepSeek Live2D Model；`storage` → storageDirs()。",
+      "2. 语音这条路是三级回落：飞鱼 → XTTS/内置 TTS → 浏览器语音；每一级失败都会在",
+      "   `/engine/tts` 的 `fellBack` 字段里写清楚是谁换成了谁，以及原因。",
+      "3. 逐项原始数据见同目录同名 `.json`（字段：id / label / status / detail / hint / fix）。",
+      "",
+    ];
+    fs.writeFileSync(mdPath, lines.join("\n"), "utf8");
+    fs.writeFileSync(jsonPath, JSON.stringify({
+      at: Date.now(),
+      version: app.getVersion(),
+      summary, score, head,
+      items,
+      system: {
+        electron: process.versions.electron,
+        node: process.versions.node,
+        os: os.type() + " " + os.release(),
+        arch: process.arch,
+        userData: app.getPath("userData"),
+      },
+    }, null, 2), "utf8");
+    log("[diag] 体检完成：" + mdPath);
+  } catch (e) {
+    logErr("[diag] 报告写不出去：" + e);
+  }
+
+  diagLast = { at: Date.now(), score, head, summary, items, path: mdPath, jsonPath };
+  return { ok: true, ...diagLast, elapsed: Date.now() - t0 };
+}
+
+ipcMain.handle("diag:run", () => diagRun());
+ipcMain.handle("diag:last", () => (diagLast ? { ok: true, ...diagLast } : { ok: false }));
+ipcMain.handle("diag:openLatest", async () => {
+  const p = diagLast && diagLast.path;
+  if (!p) return { ok: false, error: "还没有体检报告" };
+  try { await shell.openPath(p); return { ok: true, path: p }; }
+  catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+});
+
+// ---------- 闲置词：设置、预合成缓存、命中查询 ----------
+// 「当前这套声音」= 用户选的引擎 + 音色。缓存按这套声音分目录，
+// 所以这里算出来的两个值同时是「合成参数」和「缓存键」。
+function idleTarget() {
+  const s = S.get();
+  const engine = s.voiceOut === "feiyu" ? "feiyu"
+    : s.voiceOut === "xtts" ? "xtts"
+      : s.voiceOut === "rvc" ? "rvc" : "tts";
+  const voice = engine === "feiyu" ? (s.feiyuStyle || "cute")
+    : engine === "xtts" ? "xtts"
+      : engine === "rvc" ? (s.rvcModel || "rvc")
+        : (s.voiceId || "default");
+  // RVC 是在 TTS 之后实时换音色（不是一条能批量合成的链），
+  // 预合成对它没有意义——合成出来的还是 TTS 原声。诚实说清楚，别假装做了。
+  return { engine, voice, canCache: engine !== "rvc" };
+}
+
+function idleSendProgress(payload) {
+  try {
+    if (win && !win.isDestroyed()) win.webContents.send("idle:progress", payload);
+  } catch (e) { }
+  try {
+    if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send("idle:progress", payload);
+  } catch (e) { }
+}
+
+// 「这批缓存是给谁做的」——记在设置里，用来回答一个很实际的问题：
+// 用户换了引擎/音色之后，听到的是新声音，但缓存目录里躺的还是上一套。
+// 不比对就会以为「明明缓存好了，怎么没变快」。stale=true 时设置页会明说。
+function idleCacheMeta(t) {
+  const engine = S.get("idleCacheEngine") || "";
+  const voice = S.get("idleCacheVoice") || "";
+  const at = Number(S.get("idleCacheAt")) || 0;
+  const target = t || idleTarget();
+  const stale = !!(engine && (engine !== target.engine || String(voice) !== String(target.voice)));
+  return { engine, voice, at, stale };
+}
+
+// 换引擎/音色后自动补缓存（设置里的「自动补」开关）。
+// 放在主进程：设置窗口不一定开着，而这件事跟窗口开没开无关。
+let idleAutoTimer = null;
+function idleAutoMaybeBuild(why) {
+  if (!S.get("idleCacheAuto")) return;
+  const t = idleTarget();
+  if (!t.canCache) return;
+  if (IDLE_CACHE.running()) return;
+  const st = IDLE_CACHE.status(t.engine, t.voice);
+  if (!st.total || st.cached >= st.total) return;
+  clearTimeout(idleAutoTimer);
+  // 等 8 秒：用户可能连着改好几个下拉框，别每改一次就起一轮合成。
+  idleAutoTimer = setTimeout(() => {
+    idleAutoTimer = null;
+    if (!S.get("idleCacheAuto") || IDLE_CACHE.running()) return;
+    const now = idleTarget();
+    if (!now.canCache || IDLE_CACHE.status(now.engine, now.voice).missing <= 0) return;
+    log("[idle] 自动补缓存（" + why + "）：" + now.engine + "/" + now.voice);
+    S.patch({ idleCacheEngine: now.engine, idleCacheVoice: now.voice });
+    IDLE_CACHE.build({
+      engine: now.engine,
+      voice: now.voice,
+      onProgress: (p) => idleSendProgress(p),
+      match: () => {
+        const c = idleTarget();
+        return c.engine === now.engine && String(c.voice) === String(now.voice);
+      },
+    }).then((r) => {
+      if (r && r.cached) S.patch({ idleCacheAt: Date.now() });
+      idleSendProgress({ phase: "done", ...IDLE_CACHE.status(now.engine, now.voice) });
+    }).catch((e) => {
+      log("[idle] 自动补缓存失败: " + String((e && e.message) || e));
+      idleSendProgress({ phase: "error", error: String((e && e.message) || e) });
+    });
+  }, 8000);
+}
+
+ipcMain.handle("idle:status", () => {
+  const t = idleTarget();
+  return {
+    ok: true,
+    target: t,
+    lines: Lines.idleLines().length,
+    pools: Lines.IDLE_KEYS.length,
+    status: t.canCache ? IDLE_CACHE.status(t.engine, t.voice) : null,
+    all: IDLE_CACHE.statusAll(),
+    running: IDLE_CACHE.running(),
+    root: IDLE_CACHE.root,
+    meta: idleCacheMeta(t),
+    auto: S.get("idleCacheAuto") === true,
+  };
+});
+
+ipcMain.handle("idle:build", async (_e, opt) => {
+  const t = idleTarget();
+  if (!t.canCache) {
+    return { ok: false, error: "RVC 是实时换音色，没有可预合成的音色，换回飞鱼/XTTS/TTS 再试" };
+  }
+  if (IDLE_CACHE.running()) return { ok: false, error: "已经在合成了" };
+  // 先记下「这批缓存是给谁做的」，设置页据此显示「你听的是这份」。
+  S.patch({ idleCacheEngine: t.engine, idleCacheVoice: t.voice });
+  // 后台跑：合成 300 多句要好几分钟，不能把 IPC 挂着。
+  IDLE_CACHE.build({
+    engine: t.engine,
+    voice: t.voice,
+    onProgress: (p) => idleSendProgress(p),
+    match: () => {
+      const now = idleTarget();
+      return now.engine === t.engine && String(now.voice) === String(t.voice);
+    },
+  }).then((r) => {
+    if (r && r.errors && r.errors.length) log("[idle] 失败样例：" + r.errors.join(" / "));
+    if (r && r.cached) S.patch({ idleCacheAt: Date.now() });
+    idleSendProgress({ phase: "done", ...IDLE_CACHE.status(t.engine, t.voice) });
+  }).catch((e) => {
+    log("[idle] 预合成失败: " + String((e && e.message) || e));
+    idleSendProgress({ phase: "error", error: String((e && e.message) || e) });
+  });
+  return { ok: true, started: true, target: t, total: IDLE_CACHE.status(t.engine, t.voice).missing };
+});
+
+ipcMain.handle("idle:cancel", () => IDLE_CACHE.cancel());
+
+ipcMain.handle("idle:clear", (_e, opt) => {
+  const o = opt || {};
+  const t = idleTarget();
+  const r = IDLE_CACHE.clear(o.engine || t.engine, o.voice || t.voice);
+  if (r.ok) S.patch({ idleCacheAt: 0 });
+  return r;
+});
+
+ipcMain.handle("idle:lookup", (_e, opt) => {
+  const text = String((opt && opt.text) || "");
+  if (!text) return { ok: false };
+  const t = idleTarget();
+  if (!t.canCache) return { ok: false, why: "rvc" };
+  return IDLE_CACHE.lookup(t.engine, t.voice, text);
+});
+
+ipcMain.handle("idle:open", async () => {
+  try { await shell.openPath(IDLE_CACHE.root); return { ok: true, path: IDLE_CACHE.root }; }
+  catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+});
+
+
+// 游戏模式：设置页和托盘都走同一个入口，状态只有主进程说了算
+ipcMain.handle("game:set", (_e, on) => setGameMode(!!on));
+ipcMain.handle("game:status", () => ({ ok: true, ...gameStatus() }));
+
+
 // 渲染进程把「刚才失败了」报上来。只收白名单字段，页面里塞不进任意结构。
 ipcMain.on("fault:report", (_e, rec) => faultAdd(rec));
 ipcMain.handle("fault:list", () => ({ ok: true, items: faultRing.slice() }));
@@ -4761,6 +5411,13 @@ app.whenReady().then(async () => {
   }
 
   makeTray();
+  // 上次是在游戏模式里退出的：这次也按游戏模式静静起来（不画、不占显存），
+  // 托盘里点「退出游戏模式」或者按唤出热键就回来。不这么做的话，
+  // 用户会以为自己关掉她之后又莫名其妙被拉起来了。
+  if (S.get("gameMode")) {
+    S.patch({ gameMode: false });
+    setGameMode(true).catch((e) => log("[game] 开机进入游戏模式失败: " + e));
+  }
   startDshWatcher();
   startRvcIdleWatch();
   applyLaunchAtLogin(S.get("launchAtLogin"));
@@ -4794,14 +5451,21 @@ app.whenReady().then(async () => {
   miniFixBridgeUrl();
   if ((S.get().replyMode || "dsh") === "dsh") {
     setTimeout(() => {
-      probeBridge()
-        .then((ok) => {
-          if (ok) { log("[main] 外部桥接已就绪：" + bridgeBase()); return null; }
-          log("[main] 外部桥接未响应，改起自带迷你桥接（" + MINI_PORT + "）");
-          return miniStart();
-        })
-        .catch((e) => log("[main] 桥接探测失败: " + e));
+      bridgeEnsure()
+        .then((r) => log("[main] 桥接自检：" + (r.ok ? "通" : "不通") + " · " + r.note))
+        .catch((e) => log("[main] 桥接自检失败: " + e));
     }, 3000);
+    // 之后每 90 秒看一眼：桥的进程可能被安全软件、任务管理器或者它自己的崩溃带走，
+    // 以前这种情况只会一路「连不上」到用户重启程序。现在它自己会回来。
+    if (!bridgeWatchTimer) {
+      bridgeWatchTimer = setInterval(() => {
+        if (appQuitting) return;
+        bridgeEnsure({ quiet: true })
+          .then((r) => { if (!r.ok) log("[bridge] 巡检出问题：" + r.note); })
+          .catch(() => { });
+      }, 90 * 1000);
+      try { bridgeWatchTimer.unref(); } catch (e) { }
+    }
   }
 
   // turbo 模型没随包发（1.6G 会让 NSIS 压不出来）。
@@ -4939,6 +5603,9 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", () => {
+  appQuitting = true;   // 桥接自愈要认这个：正在退出就别再重拉迷你桥
+  if (bridgeWatchTimer) { clearInterval(bridgeWatchTimer); bridgeWatchTimer = null; }
+  if (miniRestartTimer) { clearTimeout(miniRestartTimer); miniRestartTimer = null; }
   if (cursorTimer) clearInterval(cursorTimer);
   if (watcherTimer) clearInterval(watcherTimer);
   if (rvcIdleTimer) clearInterval(rvcIdleTimer);
