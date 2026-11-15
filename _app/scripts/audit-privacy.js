@@ -61,6 +61,9 @@ const FILES = [
   { p: "crash", by: "main.js recordCrash()", what: "崩溃快照（最多 20 份）", wipe: true },
   { p: "Crashpad", by: "Electron crashReporter（uploadToServer:false）", what: "Chromium 自己的崩溃转储", wipe: true },
   { p: "runtime", by: "storageDirs().data，里面是 tts/ 语音缓存", what: "合成出来的音频（等于用户说过的话）", wipe: true },
+  { p: "idle-cache", by: "src/idle-cache.js（main.js 里 createIdleCache 的 root）", what: "预合成好的闲置台词音频", wipe: true },
+  { p: ".diag-write-test", by: "main.js diagRun() 第 1 项：写一个字节再删掉", what: "体检时探测配置目录可写，内容只有 \"1\"，读完立刻删", wipe: true },
+  { p: "diag", by: "main.js diagExport() 的「导出诊断包」", what: "体检报告（md + json），含版本、路径、最近故障文本", wipe: true },
   { p: "models", by: "packs/store.js 导入模型", what: "用户自己导入的 Live2D 模型", wipe: false, why: "用户辛苦导入的模型不该被「清除数据」顺手删掉" },
 ];
 

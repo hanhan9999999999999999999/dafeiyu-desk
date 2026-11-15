@@ -1161,16 +1161,31 @@
     return out;
   }
 
+  // 首块门槛：够长就立刻开口（时间轴播放器会把后续块接上），短得离谱才多等一块。
+  // 拎成纯函数是为了能被 scripts/test-voice-perf.js 直接跑，而不是靠读源码猜。
+  function feiyuFirstBlockReady(got, firstDur, hasPlayer) {
+    if (got >= 2) return true;
+    if (got < 1) return false;
+    // 没有时间轴播放器时只有 <audio> 顺序播放，凑不出一根时间线，一块就够
+    if (!hasPlayer) return true;
+    return firstDur >= 0.8;
+  }
+
   async function speakFeiyuStream(text, onFirst) {
     const my = ++speechGen;
-    const queue = [];
+    const queue = [];          // 回落路径（没有 WebAudio 时）才用
     const owned = [];
+    const player = createPcmPlayer();
+    if (player) {
+      if (pcmPlayer) { try { pcmPlayer.stop(); } catch (e) { } }
+      pcmPlayer = player;
+    }
     let finished = false;
     let failed = null;
     let got = 0;
     let firstDur = 0;
     const t0 = Date.now();
-    log("飞鱼流式 " + String(text).length + " 字");
+    log("飞鱼流式 " + String(text).length + " 字" + (player ? "（时间轴播放）" : "（逐段播放）"));
 
     const readerTask = (async function () {
       const r = await fetch("/engine/tts_stream", {
@@ -1205,9 +1220,14 @@
           } else if (ev.t === "err") {
             throw new Error(ev.error || "流式合成出错");
           } else if (ev.t === "chunk" && ev.b64) {
-            const url = URL.createObjectURL(new Blob([b64ToBytes(ev.b64)], { type: "audio/wav" }));
-            owned.push(url);
-            queue.push(url);
+            const bytes = b64ToBytes(ev.b64);
+            if (player) {
+              player.push(bytes);
+            } else {
+              const url = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
+              owned.push(url);
+              queue.push(url);
+            }
             got += 1;
             wakeUp();
             if (got === 1) { firstDur = Number(ev.dur) || 0; log("飞鱼首段 " + ((Date.now() - t0) / 1000).toFixed(2) + "s / " + (ev.dur || 0) + "s"); }
@@ -1216,24 +1236,45 @@
       }
     })().catch(function (e) { failed = e; wakeUp(); }).finally(function () { finished = true; wakeUp(); });
 
-    // 第一块只有 1 秒出头时再等第二块：紧跟的第二块往往还没算完，
-    // 只等一块会在一句话中间断掉。第一块本身够长（≥1.0s）就先播，
-    // 不为凑两块白等一整句。
+    // 第一块够长就立刻开口。时间轴播放器会把后面的块接在同一根时间线上，
+    // 所以「再等一块」已经换不来更连贯的效果，只会白白晚几十到几百毫秒。
+    // 只有首块短得离谱（<0.8s，多半是语气词）时才多等一块，免得刚响就断。
     const tw = Date.now();
     while (!finished && !failed) {
       if (my !== speechGen) break;
-      if (queue.length >= 2) break;
-      if (queue.length >= 1 && firstDur >= 1.0) break;
+      if (feiyuFirstBlockReady(got, firstDur, !!player)) break;
       if (Date.now() - tw > 120000) { failed = new Error("首段超时"); break; }
-      await waitTick(50);
+      await waitTick(30);
     }
-    if (failed || !queue.length) {
+    if (failed || !got) {
       try { await readerTask; } catch (e) { }
+      try { if (player) player.stop(); } catch (e) { }
+      if (pcmPlayer === player) pcmPlayer = null;
       owned.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) { } });
       throw failed || new Error("没有拿到音频");
     }
+    if (my !== speechGen) {
+      try { if (player) player.stop(); } catch (e) { }
+      if (pcmPlayer === player) pcmPlayer = null;
+      return false;
+    }
 
-    // 边播边等后面的块：播放和合成在两条异步线上，队列空了就等一下
+    // 口型：时间轴这条路也要让 analyser 跑起来，否则嘴一动不动。
+    if (!mouthRaf) mouthRaf = requestAnimationFrame(mouthLoop);
+
+    if (player) {
+      // 首声按「真正开始出声」的那一刻报，而不是按排进时间轴的那一刻报。
+      const lag = player.firstStartIn();
+      if (onFirst) setTimeout(onFirst, Math.max(0, Math.round(lag * 1000)));
+      try { await readerTask; } catch (e) { }
+      await player.end();
+      if (pcmPlayer === player) pcmPlayer = null;
+      stopMouth();
+      log("飞鱼播完 " + got + " 段（时间轴）");
+      return got > 0;
+    }
+
+    // ── 回落：没有 WebAudio 时还是逐段 <audio>，行为与以前一致 ──
     let played = 0;
     while (true) {
       if (my !== speechGen) break;
@@ -1449,11 +1490,115 @@
     try { a.removeAttribute("src"); a.src = ""; a.load(); } catch (e) { }  // load() 才会真正释放解码器
   }
 
+  // 飞鱼流式专用的「一条时间轴」播放器。
+  //
+  // 为什么另起一套：以前每一块 WAV 都新建一个 <audio>，走
+  // createElement → 设 src → 解码 → play() 这一串，每段光启动就要几十毫秒，
+  // 段与段之间必然能听见一下空气；块越多、断得越多。
+  // 现在改成解码后直接排进 WebAudio 的时间轴：
+  //   后一块的起点 = max(现在 + 40ms, 前一块的终点)
+  // 段间因此是零空隙（采样级对齐），启动延迟也只剩一次 decode。
+  // 口型还是读同一个 analyser —— 声音从这条路出来，嘴照样跟着动。
+  let pcmPlayer = null;
+
+  function createPcmPlayer() {
+    if (!ensureMouthGraph()) return null;
+    const c = mouthCtx;
+    if (!c) return null;
+    if (c.state === "suspended") { try { c.resume(); } catch (e) { } }
+
+    const gain = c.createGain();
+    gain.gain.value = muted ? 0 : volume;
+    gain.connect(mouthAnalyser || c.destination);
+
+    const sources = [];
+    let at = 0;              // 下一条的起始时刻（AudioContext 时间轴）
+    let chain = Promise.resolve();
+    let dead = false;
+    let ended = false;
+    let timer = 0;
+    let settle = null;
+    let startedAt = 0;
+    let firstAt = 0;         // 第一块真正开口的那一刻（ctx 时间）
+    const allDone = new Promise((r) => { settle = r; });
+
+    function finish() {
+      if (ended) return;
+      ended = true;
+      if (timer) { clearTimeout(timer); timer = 0; }
+      try { gain.disconnect(); } catch (e) { }
+      if (settle) settle();
+    }
+
+    // 排片的尾巴到了就收工：不用等每条 onended，只要时间轴走完即可。
+    function arm() {
+      if (timer) { clearTimeout(timer); timer = 0; }
+      if (ended || dead) return;
+      const left = Math.max(0, at - c.currentTime) * 1000 + 60;
+      timer = setTimeout(finish, left);
+    }
+
+    function schedule(bytes) {
+      // 每块都是完整 WAV，decodeAudioData 会吃掉 44 字节头并重采样到设备采样率。
+      const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      return c.decodeAudioData(copy).then((buf) => {
+        if (dead || !buf || !buf.duration) return;
+        const src = c.createBufferSource();
+        src.buffer = buf;
+        src.connect(gain);
+        // 40ms 余量：解码是异步的，排得太紧会落在「过去」，WebAudio 会当成
+        // 立刻播 —— 两块就叠在一起了（听起来像吞字）。
+        const startAt = Math.max(c.currentTime + 0.04, at || 0);
+        src.start(startAt);
+        if (!firstAt) firstAt = startAt;
+        at = startAt + buf.duration;
+        sources.push(src);
+        src.onended = () => {
+          try { src.disconnect(); } catch (e) { }
+          const i = sources.indexOf(src);
+          if (i >= 0) sources.splice(i, 1);
+        };
+        arm();
+      }).catch((e) => {
+        log("音频块解码失败: " + (e && e.message ? e.message : e));
+      });
+    }
+
+    return {
+      get closed() { return ended || dead; },
+      get duration() { return at - (startedAt || 0); },
+      // 串行解码：块必须按到达顺序排进去，否则先解完的后排、顺序就乱了。
+      push(bytes) {
+        if (dead) return chain;
+        startedAt = startedAt || c.currentTime;
+        chain = chain.then(() => schedule(bytes));
+        return chain;
+      },
+      firstStartIn() { return firstAt ? Math.max(0, firstAt - c.currentTime) : 0; },
+      setVolume(v) { try { gain.gain.value = muted ? 0 : Math.max(0, Math.min(1, v)); } catch (e) { } },
+      end() { arm(); if (!sources.length) finish(); return allDone; },
+      stop() {
+        dead = true;
+        try { sources.forEach((s) => { try { s.stop(); } catch (e) { } try { s.disconnect(); } catch (e) { } }); } catch (e) { }
+        sources.length = 0;
+        finish();
+      },
+      wait() { return allDone; },
+    };
+  }
+
   function stopPlayback() {
     // 分段流式时，光停当前这段不够 —— 后台还在合成后面的句子。
     // 代际加一，那边发现对不上就自己收手。
     speechGen += 1;
     speechAbort += 1;
+    if (pcmPlayer) {
+      try { pcmPlayer.stop(); } catch (e) { }
+      pcmPlayer = null;
+      stopMouth();
+      log("播放已打断（时间轴）");
+      return true;
+    }
     if (currentAudio === null) return false;
     // 先打标记再清 src：清 src 会让 onerror 立刻炸出来，
     // 不标记的话日志里每次打断后面都跟一条「播放失败 code=4」，看着像 bug。
@@ -1527,7 +1672,7 @@
     const want = Math.min(1, Math.pow(rms * 4.2, 0.62));
     // 张得快、合得慢：闭合太利索像假牙在打架
     mouthLevel = want > mouthLevel ? want : mouthLevel + (want - mouthLevel) * 0.28;
-    if (currentAudio !== null) mouthRaf = requestAnimationFrame(mouthLoop);
+    if (currentAudio !== null || pcmPlayer) mouthRaf = requestAnimationFrame(mouthLoop);
     else mouthLevel = 0;
   }
 
@@ -1860,6 +2005,7 @@
       const n = Number(v);
       if (Number.isFinite(n)) volume = Math.max(0, Math.min(1, n));
       try { if (currentAudio) currentAudio.volume = muted ? 0 : volume; } catch (e) { }
+      try { if (pcmPlayer) pcmPlayer.setVolume(volume); } catch (e) { }
       return volume;
     },
     getVolume: () => volume,
@@ -1886,7 +2032,7 @@
       peak: Math.round(mouthPeak * 1000) / 1000,
       state: mouthCtx ? mouthCtx.state : "no-ctx",
       hasAn: !!mouthAnalyser,
-      playing: currentAudio !== null,
+      playing: currentAudio !== null || !!pcmPlayer,
     }),
     resetMouthPeak: () => { mouthPeak = 0; },
     // 排障用：按钮看着是开的、isOn 说是关的这类矛盾，一次就能看清内部到底哪一步没走完。
@@ -1949,7 +2095,7 @@
     chirp(group, opts) {
       // 静音时不响；正经语音在播的时候也不插：两个声音叠一起会糊成一团。
       if (muted) return false;
-      if (currentAudio) return false;
+      if (currentAudio || pcmPlayer) return false;
       const pool = CHIRPS[group];
       if (!pool || !pool.length) return false;
       const name = pool[Math.floor(Math.random() * pool.length)];

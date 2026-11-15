@@ -100,3 +100,9 @@ _shots/
 # 需要 PSD 请到发布页或网盘取；仓库里只留模型配置与运行时资源。
 DeepSeek Live2D Model/psd/
 **/*.psd
+
+# ---- 离屏看 UI 的截图工具产物（构建脚本入库，产物不入库）----
+.ui-shots/*.html
+.ui-shots/*.png
+.voice-fast-backup.txt
+**/__pycache__/

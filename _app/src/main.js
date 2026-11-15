@@ -3868,6 +3868,8 @@ ipcMain.handle("data:wipe", () => {
     "run.log.1",
     "last-boot.txt",
     "boot-timing.txt",
+    // 体检时探测「配置目录写得进去吗」留下的一个字节；正常流程自己删，中途崩过就可能还在
+    ".diag-write-test",
   ];
   for (const f of files) rmFile(path.join(U, f));
 
@@ -3876,7 +3878,14 @@ ipcMain.handle("data:wipe", () => {
     for (const f of fs.readdirSync(U)) if (/^chatlog\.json\.bad-/.test(f)) rmFile(path.join(U, f));
   } catch (e) {}
 
-  const dirs = [path.join(U, "crash"), path.join(U, "Crashpad", "reports"), path.join(U, "runtime", "tts")];
+  const dirs = [
+    path.join(U, "crash"),
+    path.join(U, "Crashpad", "reports"),
+    path.join(U, "runtime", "tts"),
+    // 闲置词预合成（一套台词音频）与诊断报告都是可再生的：留着只会让人「清过一次还在」
+    path.join(U, "idle-cache"),
+    path.join(U, "diag"),
+  ];
   for (const d of dirs) rmTree(d);
 
   log(

@@ -113,6 +113,8 @@ const els = {
   engName: document.getElementById("engName"),
   engTag: document.getElementById("engTag"),
   engFactEngine: document.getElementById("engFactEngine"),
+  engFactFirst: document.getElementById("engFactFirst"),
+  engFactRtf: document.getElementById("engFactRtf"),
   engFactDevice: document.getElementById("engFactDevice"),
   engFactIdle: document.getElementById("engFactIdle"),
   engFactHome: document.getElementById("engFactHome"),
@@ -1329,6 +1331,40 @@ function syncIdleInputs(idle) {
   }
 }
 
+// 实测性能：引擎每次合成完都会上报 firstMs（第一块音频离开引擎的时刻）和 rtf
+// （合成用时 / 音频时长）。这两个数字是"快不快"的唯一可信证据，所以直接摆出来，
+// 并按商业标准分档上色：首声 ≤2s 绿、≤3s 黄、更慢红；RTF ≤1 表示合成比播放快。
+function engPerf(perf) {
+  const first = Number(perf && (perf.firstMs || perf.first)) || 0;
+  const rtf = Number(perf && perf.rtf) || 0;
+  const cached = Number(perf && perf.cachedSentences) || 0;
+  const sents = Number(perf && perf.sentences) || 0;
+
+  if (els.engFactFirst) {
+    els.engFactFirst.className = !first ? "" : first <= 2000 ? "good" : first <= 3000 ? "warn" : "bad";
+    els.engFactFirst.textContent = first ? (first / 1000).toFixed(2) + " 秒" : "还没说话";
+    els.engFactFirst.title = first
+      ? "上一次开口，第一块音频离开引擎用了 " + (first / 1000).toFixed(2) + " 秒；后面的句子由播放队列无缝接上，不会等整段合成完。"
+      : "说一句就会在这里留下实测首声。";
+  }
+  if (els.engFactRtf) {
+    if (!rtf) {
+      els.engFactRtf.className = "";
+      els.engFactRtf.textContent = "—";
+      els.engFactRtf.title = "合成用时 ÷ 音频时长；≤1 表示合成比播放快，队列不会饿。";
+    } else if (cached && sents && cached >= sents) {
+      els.engFactRtf.className = "good";
+      els.engFactRtf.textContent = "缓存秒回";
+      els.engFactRtf.title = "整段都命中句子缓存（同一句话说过一次就不用再算）。";
+    } else {
+      els.engFactRtf.className = rtf <= 1 ? "good" : rtf <= 1.3 ? "warn" : "bad";
+      els.engFactRtf.textContent = rtf.toFixed(2) + "× 实时";
+      els.engFactRtf.title = "合成用时 ÷ 音频时长。≤1 表示算得比播得快。" +
+        (sents ? "（本次 " + sents + " 句，其中 " + cached + " 句命中缓存）" : "");
+    }
+  }
+}
+
 async function checkFeiyuEngine() {
   const v = (cur && cur.voiceOut) || "tts";
 
@@ -1344,6 +1380,9 @@ async function checkFeiyuEngine() {
     engFact(els.engFactDevice, v === "tts" ? "本机 CPU" : "见下方参数");
     engFact(els.engFactIdle, v === "tts" ? "不占显存" : "见下方参数");
     engFact(els.engFactHome, v === "tts" ? "随程序内置" : "见下方参数");
+    // 首声 / RTF 是飞鱼的实测指标，别的引擎没有同口径数据，留空而不是编一个
+    if (els.engFactFirst) { els.engFactFirst.className = ""; els.engFactFirst.textContent = "—"; els.engFactFirst.title = "首声实测只在飞鱼引擎下采集。"; }
+    if (els.engFactRtf) { els.engFactRtf.className = ""; els.engFactRtf.textContent = "—"; els.engFactRtf.title = "合成速度实测只在飞鱼引擎下采集。"; }
     engNotice(v === "tts"
       ? "TTS 是保底那一级：任何引擎出问题，最后都由它出声，所以不会没声音。"
       : "这两个引擎自己也有启动/安装按钮，在下面「引擎参数」里。", "ok");
@@ -1363,6 +1402,7 @@ async function checkFeiyuEngine() {
     const st = () => (els.feiyuEngineState ? els.feiyuEngineState.textContent : "");
 
     engFact(els.engFactEngine, "飞鱼（CosyVoice3）");
+    engPerf(j && j.perf);
     engFact(els.engFactDevice, j && j.device ? j.device : (j && j.ready ? "已加载" : "未加载"));
     engFact(els.engFactIdle, fmtIdle(idle));
     engFact(els.engFactHome, home || "自动", home);

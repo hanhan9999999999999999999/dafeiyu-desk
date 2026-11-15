@@ -54,6 +54,7 @@ let child = null;
 let idleTimer = null;
 let starting = null;
 let lastErr = '';
+let lastPerf = null;      // 最近一次合成的实测指标（首声 / RTF / 块数），设置页显示用
 let ready = false;
 let device = 'cpu';
 let styles = [];
@@ -124,6 +125,7 @@ export function status() {
     missing: missingParts(),
     lastError: lastErr,
     idle: idleInfo(),
+    perf: lastPerf,
   };
 }
 
@@ -155,7 +157,9 @@ async function ping(ms = 800) {
   try {
     const r = await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(ms) });
     if (!r.ok) return null;
-    return await r.json();
+    const h = await r.json();
+    if (h && h.perf) lastPerf = Object.assign({ at: Date.now() }, h.perf);
+    return h;
   } catch {
     return null;
   }
@@ -423,6 +427,15 @@ export async function* stream(text, opts = {}) {
         } else if (ev.t === 'done') {
           ready = true;
           curStyle = style;
+          // 服务端在 done 里带回了本次的实测指标；设置页要显示「首声 X 秒 / RTF」
+          // 就靠这一份，不用再额外问一次。ping 回来的 perf 也会写进同一个槽。
+          lastPerf = {
+            firstMs: Number(ev.firstMs) || 0,
+            ms: Number(ev.ms) || 0,
+            chunks: Number(ev.chunks) || 0,
+            rtf: Number(ev.rtf) || 0,
+            at: Date.now(),
+          };
           try { opts.onDone && opts.onDone(ev); } catch {}
         } else if (ev.t === 'err') {
           lastErr = ev.error || '飞鱼流式出错';

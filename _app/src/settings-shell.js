@@ -175,16 +175,49 @@
 
   // ── 页内分组（声音与行为） ───────────────────────────────
   const subs = document.querySelector('.subtabs[data-for="behavior"]');
+  // 子页切换抽成函数：页签按钮和概览小卡都要用同一条路，免得两处各写一遍再走偏
+  function showSub(name) {
+    if (!subs || !name) return;
+    for (const t of subs.querySelectorAll(".subtab")) t.classList.toggle("on", t.dataset.sub === name);
+    for (const p of document.querySelectorAll('.subpage[data-sub]')) {
+      p.classList.toggle("on", p.dataset.sub === name);
+    }
+  }
   if (subs) {
     subs.addEventListener("click", (e) => {
       const b = e.target.closest(".subtab");
       if (!b) return;
-      const name = b.dataset.sub;
-      for (const t of subs.querySelectorAll(".subtab")) t.classList.toggle("on", t === b);
-      for (const p of document.querySelectorAll('.subpage[data-sub]')) {
-        p.classList.toggle("on", p.dataset.sub === name);
-      }
+      showSub(b.dataset.sub);
     });
+  }
+
+  // ── 概览小卡当入口 ──────────────────────────────────────
+  // data-goto="page" 或 "page:sub"。点击/回车都走同一段：
+  // 先撤掉搜索态（否则目标页里全是 hidden，看着像坏了），再切页、切子页。
+  function goto(gotoSpec) {
+    const [pg, sub] = String(gotoSpec || "").split(":");
+    if (!pg) return;
+    if (q && q.value.trim()) { q.value = ""; applySearch(""); }
+    showPage(pg);
+    if (sub) showSub(sub);
+  }
+  const ovgrid = document.querySelector(".ovgrid");
+  if (ovgrid) {
+    ovgrid.addEventListener("click", (e) => {
+      const c = e.target.closest(".ovcard.go");
+      if (c) goto(c.dataset.goto);
+    });
+    ovgrid.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const c = e.target.closest(".ovcard.go");
+      if (!c) return;
+      e.preventDefault();
+      goto(c.dataset.goto);
+    });
+    // 让键盘能停上去：只加 tabindex，不改语义（它本来就不是按钮）
+    for (const c of ovgrid.querySelectorAll(".ovcard.go")) {
+      if (!c.hasAttribute("tabindex")) c.tabIndex = 0;
+    }
   }
 
   // ── 概览 ────────────────────────────────────────────────
@@ -228,6 +261,43 @@
     setText("ovVoiceMeta", s.voiceOut === "feiyu" ? "中文原生 · 最像真人" : s.voiceOut === "xtts" ? "参考音频克隆" : s.voiceOut === "rvc" ? "TTS 之后换嗓子" : "最快最稳");
     setText("ovReply", REPLY_LABEL[s.replyMode] || "DSH");
     setText("ovReplyMeta", s.replyMode === "api" ? (s.apiModel || "还没填模型名") : "本机 DSH · 能看文件能干活");
+
+    // 开口速度：只在飞鱼下有意义（首声 / RTF 是引擎自己上报的实测值）。
+    // 没数据时说清楚"说一句就有数"，不留一个光秃秃的破折号让人猜。
+    (async () => {
+      const v = $("ovFirst"), meta = $("ovFirstMeta");
+      if (!v) return;
+      v.removeAttribute("style");
+      if (s.voiceOut !== "feiyu") {
+        v.textContent = "—";
+        if (meta) meta.textContent = "首声实测只在飞鱼引擎下采集";
+        return;
+      }
+      try {
+        const r = await fetch("/engine/feiyu_status", { cache: "no-store" });
+        const j = await r.json();
+        const p = (j && j.perf) || null;
+        const first = p ? Number(p.firstMs) || 0 : 0;
+        if (!first) {
+          v.textContent = "还没说话";
+          if (meta) meta.textContent = "说一句就会在这里留下实测首声";
+          return;
+        }
+        v.textContent = (first / 1000).toFixed(2) + " 秒";
+        v.style.color = first <= 2000 ? "var(--good)" : first <= 3000 ? "var(--warn)" : "var(--bad)";
+        const rtf = Number(p.rtf) || 0;
+        const cached = Number(p.cachedSentences) || 0;
+        const sents = Number(p.sentences) || 0;
+        if (meta) {
+          meta.textContent = cached && sents && cached >= sents
+            ? "整段命中缓存 · 秒回"
+            : (rtf ? "合成 " + rtf.toFixed(2) + "× 实时（≤1 就是比播得快）" : "第一块音频离开引擎的耗时");
+        }
+      } catch (e) {
+        v.textContent = "—";
+        if (meta) meta.textContent = "引擎没连上，去「声音与行为 → 变声引擎」看";
+      }
+    })();
     setText("ovHotkey", s.hotkeySummon || "未设置");
     setText("tipHotkey", s.hotkeySummon || "Ctrl+Alt+F");
 

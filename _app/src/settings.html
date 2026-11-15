@@ -214,6 +214,10 @@
   .eng-fact{display:flex; flex-direction:column; gap:2px; min-width:0;}
   .eng-fact b{font-size:10.5px; font-weight:600; color:var(--faint); letter-spacing:.4px;}
   .eng-fact i{font-style:normal; font-size:12px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  /* 实测指标按档上色：数字自己带语义，比再挂一行字更快读懂 */
+  .eng-fact i.good{color:var(--good); font-weight:600;}
+  .eng-fact i.warn{color:var(--warn); font-weight:600;}
+  .eng-fact i.bad{color:var(--bad); font-weight:600;}
   .notice{font-size:11.5px; line-height:1.55; color:var(--dim); background:rgba(91,140,255,.07); border:1px solid rgba(91,140,255,.22); border-radius:8px; padding:7px 10px; margin:6px 0 4px;}
   .notice.warn{background:rgba(255,200,87,.08); border-color:rgba(255,200,87,.3); color:#ecd8a8;}
   .notice.bad{background:rgba(255,107,129,.08); border-color:rgba(255,107,129,.3); color:#f2bcc4;}
@@ -355,6 +359,11 @@
   .ovcard .k{font-size:10.5px; letter-spacing:.8px; color:var(--faint); text-transform:uppercase;}
   .ovcard .v{font-size:14px; font-weight:600; margin-top:5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .ovcard .s{font-size:11px; color:var(--dim); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  /* 概览小卡同时是入口：能点、有反馈，但不当按钮卖（不加边框高亮，只抬一点、亮一点） */
+  .ovcard.go{cursor:pointer; transition:border-color .16s, background .16s, transform .16s;}
+  .ovcard.go:hover{border-color:#3a5185; background:linear-gradient(180deg,#1b2740,#141d31); transform:translateY(-1px);}
+  .ovcard.go:focus-visible{outline:2px solid #5b8cff; outline-offset:2px;}
+  .ovcard.go:active{transform:translateY(0);}
   .quick{display:flex; flex-wrap:wrap; gap:8px; padding:10px 0 8px;}
   .quick button{
     border:1px solid var(--line2); background:#1b2740; color:var(--text);
@@ -406,20 +415,25 @@
         </div>
 
         <div class="ovgrid">
-          <div class="ovcard">
+          <div class="ovcard go" data-goto="connect" title="去「连接与模型」换模型">
             <div class="k">当前模型</div>
             <div class="v" id="ovModelName">正在读取…</div>
             <div class="s" id="ovModelMeta">—</div>
           </div>
-          <div class="ovcard">
+          <div class="ovcard go" data-goto="behavior:timbre" title="去「声音与行为 → 变声引擎」换声音">
             <div class="k">说话的声音</div>
             <div class="v" id="ovVoice">—</div>
             <div class="s" id="ovVoiceMeta">—</div>
           </div>
-          <div class="ovcard">
+          <div class="ovcard go" data-goto="connect" title="去「连接与模型」改回复来源">
             <div class="k">回复来源</div>
             <div class="v" id="ovReply">—</div>
             <div class="s" id="ovReplyMeta">—</div>
+          </div>
+          <div class="ovcard go" data-goto="behavior:timbre" title="去「声音与行为 → 变声引擎」调速度和预热">
+            <div class="k">开口速度</div>
+            <div class="v" id="ovFirst">—</div>
+            <div class="s" id="ovFirstMeta">—</div>
           </div>
         </div>
 
@@ -698,6 +712,8 @@
 
             <div class="eng-facts">
               <span class="eng-fact"><b>实际出声</b><i id="engFactEngine">—</i></span>
+              <span class="eng-fact"><b>首声</b><i id="engFactFirst">—</i></span>
+              <span class="eng-fact"><b>合成速度</b><i id="engFactRtf">—</i></span>
               <span class="eng-fact"><b>运行设备</b><i id="engFactDevice">—</i></span>
               <span class="eng-fact"><b>闲置释放</b><i id="engFactIdle">—</i></span>
               <span class="eng-fact"><b>引擎目录</b><i id="engFactHome" title="">—</i></span>

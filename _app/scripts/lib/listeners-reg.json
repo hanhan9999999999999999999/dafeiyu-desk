@@ -109,6 +109,8 @@
       "ipcRenderer.on(\"see:status\")": 1,
       "ipcRenderer.on(\"see:error\")": 1,
       "ipcRenderer.on(\"see:say\")": 1,
+      "ipcRenderer.on(\"idle:progress\")": 1,
+      "ipcRenderer.on(\"app:game-mode\")": 1,
       "ipcRenderer.on(\"pet:panel-state\")": 1,
       "ipcRenderer.on(\"adapter:select\")": 1,
       "ipcRenderer.on(\"adapter:focus-step\")": 1,
@@ -139,11 +141,11 @@
       "why": "同上，第二条回调（表达式预览）。两条分开是因为它们各自可以被单独关掉。"
     },
     {
-      "where": "src/server.js:550",
+      "where": "src/server.js:727",
       "why": "每次 listen() 都新建一个 server 对象，once(\"error\") 挂在那个新对象上。"
     },
     {
-      "where": "src/server.js:551",
+      "where": "src/server.js:728",
       "why": "同上，once(\"listening\") 也是一次性。"
     }
   ]

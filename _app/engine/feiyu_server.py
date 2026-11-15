@@ -63,11 +63,27 @@ STATE = {
     # 切声线时用它判断要不要真的重装权重——光看 style 名字会踩
     # 「cute → gentle 都以为自己在用对权重」的坑。
     "llm_ckpt": None,
+    # 已经跑过预热推理的 (声线, 参考音) 组合。换参考音要重跑一次，
+    # 因为不同参考音的 prompt token 数不同，首跳的 hop 对齐也不同。
+    "warm_sig": None,
 }
 
 
 STATE["lock"] = threading.Lock()
 STATE["last_stream"] = {}
+
+# ---- 元数据缓存 -------------------------------------------------------------
+# 这些缓存都不影响声音，只砍「每次开口前的固定开销」：
+#   · manifest.json 原来每句读 3 次（synth_stream 2 次 + use_style 1 次）；
+#   · scan_refs 原来每次合成、连 /health 都扫一遍，7 条参考音要逐个
+#     soundfile 开文件头（/health 是 6.8-9.7ms，全花在这儿）；
+#   · 参考音目录一旦有 100 条，这段就从「感觉不到的几毫秒」变成「开口前的硬延迟」。
+# 全部用 (路径, mtime, size) 当签名：用户往 refvoice 里丢新 wav，下一次调用立即生效，
+# 不需要重启服务；文件没动就一个 stat 都不多花。
+_MANI = {"sig": None, "data": None}
+_REFS = {"sig": None, "data": None, "t": 0.0}
+_DUR = {}
+
 
 
 def log(*a):
@@ -128,11 +144,21 @@ def prepare_env():
 
 def read_manifest():
     """manifest 只有几 KB，启动就读——不然 /health 报不出有哪些声线，
-    而且没加载模型时 /tts 想拿默认 speed 会踩到 params=None。"""
+    而且没加载模型时 /tts 想拿默认 speed 会踩到 params=None。
+
+    带 mtime 缓存：一句话的合成路径上它会被读 2-3 次，JSON 解析虽小，
+    但每次都重新分配一遍 styles/params 字典纯属白花；改过 manifest 自然失效。
+    """
     try:
-        m = json.loads((PKG / "manifest.json").read_text(encoding="utf-8-sig"))
+        p = PKG / "manifest.json"
+        st = p.stat()
+        sig = (str(p), st.st_mtime_ns, st.st_size)
+        if _MANI["sig"] == sig and _MANI["data"] is not None:
+            return _MANI["data"]
+        m = json.loads(p.read_text(encoding="utf-8-sig"))
         STATE["styles"] = sorted(m["styles"].keys())
         STATE["params"] = m["inference"]
+        _MANI["sig"], _MANI["data"] = sig, m
         return m
     except Exception as e:
         log("manifest 读不出来:", e)
@@ -165,6 +191,31 @@ def load_model():
         from cosyvoice.cli.cosyvoice import AutoModel
 
         torch.set_num_threads(4)
+        # ⚠ 不要开 torch.backends.cudnn.benchmark：流式分块的音频长度每块都不一样，
+        # benchmark 会对每个新形状重新跑一遍卷积算法穷举。实测同一句 27 字：
+        # 关着 RTF 1.21 / 首块 1.53s，开着 RTF 14.25 / 首块 33s（慢 12 倍）。
+        # 顺带确认线程数：threads=8/12 同样是灾难（单句 19-29s），必须留在 4。
+
+        # 每句合成结束时 CosyVoice 会调一次 torch.cuda.empty_cache()。那句调用把
+        # 分配器里缓存的显存块全还回去，下一句又要重新 cudaMalloc + 重新跑一遍
+        # kernel launch 的冷路径 —— 实测（bench_gap.py 放宽+只免 empty_cache）
+        # 同一段 72 字：RTF 0.99→0.92、累计断流 2.08s→1.47s。
+        # 但显存只有 8G，真放开了不管会慢慢逼近上限，所以改成「只剩不到 900MB
+        # 才真清」，既不拖慢速度，也不会 OOM。
+        try:
+            _real_empty = torch.cuda.empty_cache
+
+            def _guarded_empty(*a, **k):
+                try:
+                    free, _total = torch.cuda.mem_get_info()
+                    if free < 900 * 1024 * 1024:
+                        _real_empty(*a, **k)
+                except Exception:
+                    pass
+
+            torch.cuda.empty_cache = _guarded_empty
+        except Exception:
+            pass
         # fp16 开关：环境变量优先，默认关。A/B 实测 fp16 没有收益（见 STATE 注释），
         # 想对比就 FISH_FEIYU_FP16=1 起服务，试听文件放 _试听/。
         env = os.environ.get("FISH_FEIYU_FP16", "0").strip().lower()
@@ -176,6 +227,10 @@ def load_model():
         voice = AutoModel(model_dir=str(base), fp16=fp16, load_trt=False, load_vllm=False)
         STATE["voice"] = voice
         STATE["fp16"] = bool(getattr(voice, "fp16", fp16))
+        try:
+            STATE["hop0"] = int(voice.model.token_hop_len)
+        except Exception:
+            STATE["hop0"] = 25
         STATE["device"] = str(next(voice.model.llm.parameters()).device)
         STATE["ready"] = True
         STATE["style"] = None
@@ -199,7 +254,9 @@ def use_style(style):
         return True
     import torch
 
-    manifest = json.loads((PKG / "manifest.json").read_text(encoding="utf-8-sig"))
+    manifest = read_manifest()
+    if not manifest:
+        raise KeyError("manifest.json 读不出来")
     if style not in manifest["styles"]:
         raise KeyError("未知声线 %s，可选 %s" % (style, STATE["styles"]))
     sel = manifest["styles"][style]
@@ -270,16 +327,33 @@ def emo_keywords(tag):
     return EMO[max(hits, key=len)]
 
 
-def scan_refs():
+def scan_refs(ttl=1.5):
     """扫参考音频文件夹，返回 [{id, name, tags, text, dur, path}]。
-    没有同名 .txt 的条目会 text="" —— 那种用不了，直接跳过。"""
+    没有同名 .txt 的条目会 text="" —— 那种用不了，直接跳过。
+
+    带缓存：目录签名（每个文件的 名字+mtime+size）不变就直接返回上次结果，
+    ttl 只在「用户刚丢进来一个 wav」这种场景下兜底——最多 1.5s 后就能看到。
+    这条路径原来在每次合成前（还连带每次 /health）都要开 7 个音频文件读头，
+    现在稳定状态下只剩一次 scandir。
+    """
     out = []
     try:
         if not REFDIR.exists():
             return out
+        files = []
         for p in sorted(REFDIR.iterdir()):
-            if not p.is_file() or p.suffix.lower() not in AUDIO_EXT:
+            try:
+                if not p.is_file() or p.suffix.lower() not in AUDIO_EXT:
+                    continue
+                st = p.stat()
+            except Exception:
                 continue
+            files.append((p, st.st_mtime_ns, st.st_size))
+        sig = tuple((p.name, mt, sz) for p, mt, sz in files)
+        now = time.time()
+        if _REFS["sig"] == sig and now - _REFS["t"] < ttl:
+            return _REFS["data"]
+        for p, _mt, _sz in files:
             txt = p.with_suffix(".txt")
             if not txt.exists():
                 continue
@@ -299,6 +373,7 @@ def scan_refs():
                 "dur": round(wav_dur(p), 2),
                 "path": str(p),
             })
+        _REFS["sig"], _REFS["data"], _REFS["t"] = sig, out, now
     except Exception as e:
         log("[refs] 扫描失败: %s" % e)
     return out
@@ -335,15 +410,85 @@ def pick_ref(text, prefer=None):
     return min(refs, key=lambda r: r["dur"])
 
 
+def resolve_ref(style, text="", prefer=None):
+    """统一解析「这次用哪条参考音」。
+
+    流式合成 / 非流式合成 / 预热三处原来各写一遍回落逻辑，其中 manifest 那份
+    写死的 reference_audio（references/cute_N01.wav）在飞鱼模型包里并不存在，
+    结果 /warm 每次都 LibsndfileError → 预抽音色失败 → 只能逐句重抽参考音特征
+    （0.3-0.8s/句），预热推理整段也白做。现在统一成一条链：
+
+        显式指定 > 情绪打分 > manifest 预设（且文件真的存在）> 目录里最短的一条
+
+    返回 {path, prompt, name, sid, dur}；一条都没有时返回 None。
+    """
+    picked = pick_ref(text, prefer=prefer or None)
+    if not picked:
+        manifest = read_manifest() or {}
+        sel = (manifest.get("styles") or {}).get(style)
+        if sel:
+            p = PKG / sel["reference_audio"]
+            if p.exists():
+                picked = {"path": str(p), "text": sel["reference_text"],
+                          "name": style, "dur": round(wav_dur(p), 2)}
+        if not picked:
+            refs = scan_refs()
+            if refs:
+                r = min(refs, key=lambda x: x["dur"])
+                picked = {"path": r["path"], "text": r["text"],
+                          "name": r["name"], "dur": r["dur"]}
+    if not picked:
+        return None
+    prefix = (STATE.get("params") or {}).get("prompt_prefix", "")
+    prompt = prefix + picked["text"]
+    return {
+        "path": picked["path"],
+        "prompt": prompt,
+        "name": picked["name"],
+        "dur": picked.get("dur", 0),
+        "sid": _spk_id(style, prompt, picked["path"]),
+    }
+
+
+def resolve_ref_sticky(style, text="", prefer=None, ttl=25.0):
+    """同一轮回复里锁住同一条参考音。
+
+    情绪挑参考音是逐句打的（小鲸鱼+撒娇 / 可爱 / 温柔…），而客户端是一句一个
+    请求，所以一段回复里音色可能句句换人 —— 实测同一段里就出现了两条参考音，
+    听感上是"忽然换了个配音员"。这里给一个粘性窗口：上一条参考音用过去不到
+    ttl 秒、且这次没有显式指定，就继续用它。
+    """
+    now = time.perf_counter()
+    st = STATE.get("sticky") or None
+    if not prefer and st and st["style"] == style and now - st["t"] < ttl:
+        p = st["ref"]
+        STATE["sticky"] = {"style": style, "ref": p, "t": now}
+        return p
+    p = resolve_ref(style, text, prefer=prefer or None)
+    if p and not prefer:
+        STATE["sticky"] = {"style": style, "ref": p, "t": now}
+    return p
+
+
 def key_for(text, style, speed, ref=""):
     raw = "%s|%s|%.3f|%s" % (text, style, speed, ref)
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def wav_dur(path):
+    """音频时长。按 (路径, mtime, size) 记住——scan_refs 每条都要问一次，
+    而 soundfile 开文件头是真实 IO，反复做没有意义。"""
     try:
+        p = Path(str(path))
+        st = p.stat()
+        key = (str(p), st.st_mtime_ns, st.st_size)
+        hit = _DUR.get(key)
+        if hit is not None:
+            return hit
         import soundfile as sf
-        return float(sf.info(str(path)).duration)
+        d = float(sf.info(str(p)).duration)
+        _DUR[key] = d
+        return d
     except Exception:
         try:
             return os.path.getsize(path) / (24000 * 2)
@@ -363,14 +508,22 @@ def wav_bytes(audio, sr):
     return buf.getvalue()
 
 
-def split_text(text, first_max=13, next_max=30):
+def split_text(text, first_max=None, next_max=None):
     """把一段话切成「先短后长」的合成单元。
 
-    为什么要先短：第一块的合成耗时直接决定开口时间。整段 36 字要 7-13s 才
+    为什么先短：第一块的合成耗时直接决定开口时间。整段 36 字要 7-13s 才
     出第一声；切成 8-13 字的头块，1-2s 就能开口，后面的块在播放时并行合成。
     为什么后面要长：块太碎会切断句间韵律，后面的块攒到 20-30 字再送，音色
     和语调更稳，也少走几次前端。
+
+    阈值可以环境变量调（FISH_FEIYU_SPLIT_FIRST / FISH_FEIYU_SPLIT_NEXT），
+    调参/基准用 bench_gap.py 量：首块变短只影响「第一声多快」，
+    后续块变长则少走几次 frontend+prefill 的固定开销。
     """
+    if first_max is None:
+        first_max = int(os.environ.get("FISH_FEIYU_SPLIT_FIRST") or 26)
+    if next_max is None:
+        next_max = int(os.environ.get("FISH_FEIYU_SPLIT_NEXT") or 56)
     s = re.sub(r"[ \t]+", " ", str(text or "")).strip()
     s = re.sub(r"\n{2,}", "\n", s)
     if not s:
@@ -452,16 +605,12 @@ def synth_stream(text, payload):
     if style not in manifest.get("styles", {}):
         raise RuntimeError("未知声线 %s" % style)
 
-    picked = pick_ref(text, prefer=want_ref or None)
-    if picked:
-        ref_path = picked["path"]
-        prompt = STATE["params"]["prompt_prefix"] + picked["text"]
-        ref_name = picked["name"]
-    else:
-        sel = manifest["styles"][style]
-        ref_path = str(PKG / sel["reference_audio"])
-        prompt = STATE["params"]["prompt_prefix"] + sel["reference_text"]
-        ref_name = style
+    picked = resolve_ref_sticky(style, text, prefer=want_ref or None)
+    if not picked:
+        raise RuntimeError("没有可用的参考音频（refvoice 目录和 manifest 都是空的）")
+    ref_path = picked["path"]
+    prompt = picked["prompt"]
+    ref_name = picked["name"]
 
     import torch
     import numpy as np
@@ -478,10 +627,17 @@ def synth_stream(text, payload):
         log("  预抽参考音色失败，回落逐句抽", "%s: %s" % (type(e).__name__, e))
         sid = ""
 
+    # 这里**不做**预热推理。实测每次 1.6-2.2s，而它几乎总在换参考音色后重跑一次
+    # （sid 随参考音变），等于把 2 秒冷启动费直接加在用户等的第一句上（6 字句从
+    # 1.6s 变成 4.2s）。预热只在 /warm 里做一次，见 do_warm。
+
     sentences = split_text(text)
     total = len(sentences)
     idx = 0
     t_all = time.perf_counter()
+    t_first = 0.0        # 第一块音频离开服务端的时刻（= 用户听到声音的物理下限）
+    audio_sec = 0.0      # 本次一共合出多少秒音频，用来算 RTF
+    n_cached = 0         # 命中句子缓存的句数：给设置页看"这引擎是不是真在加速"
     sr = int(STATE["voice"].sample_rate)
     for si, sent in enumerate(sentences):
         t_sent = time.perf_counter()
@@ -496,12 +652,17 @@ def synth_stream(text, payload):
                 dur = max(0.1, (len(data) - 44) / (sr * 2.0))
             yield {"i": idx, "si": si, "n": total, "dur": round(dur, 3),
                    "wav": data, "text": sent, "cached": True}
+            audio_sec += dur
+            n_cached += 1
+            if not t_first:
+                t_first = time.perf_counter() - t_all
             idx += 1
             log("  流式句%d/%d 命中缓存 %.2fs" % (si + 1, total, dur))
             continue
 
         pieces = []
         with STATE["lock"], torch.inference_mode():
+            reset_hop()          # 每句都从 25 token 起步：首块不等上一句攒下的 100 token
             for x in STATE["voice"].inference_zero_shot(
                 sent, prompt, str(ref_path), zero_shot_spk_id=sid,
                 stream=True, speed=speed, text_frontend=True,
@@ -519,6 +680,9 @@ def synth_stream(text, payload):
                     "wav": wav_bytes(audio, sr),
                     "text": sent,
                 }
+                audio_sec += dur
+                if not t_first:
+                    t_first = time.perf_counter() - t_all
                 idx += 1
         # 整句攒成一条落盘：同一句话第二次出现（问候、口头禅）就能秒出
         if pieces:
@@ -529,13 +693,90 @@ def synth_stream(text, payload):
                 log("  句子缓存写失败", "%s: %s" % (type(e).__name__, e))
         log("  流式句%d/%d 用时%.2fs" % (si + 1, total, time.perf_counter() - t_sent))
 
+    ms_all = int((time.perf_counter() - t_all) * 1000)
     log("流式完成 %d 字 / %d 句 / %d 块 / %dms / %s / 参考=%s / fp16=%s" % (
-        len(text), total, idx, int((time.perf_counter() - t_all) * 1000),
-        style, ref_name, STATE.get("fp16")))
-    STATE["last_stream"] = {
-        "chars": len(text), "sentences": total, "chunks": idx,
-        "ms": int((time.perf_counter() - t_all) * 1000),
+        len(text), total, idx, ms_all, style, ref_name, STATE.get("fp16")))
+    # perf：设置页「引擎状态」卡要显示的实测数字。firstMs 是第一块音频离开服务端
+    # 的时刻，rtf = 合成用时 / 音频时长，缓存命中句数说明有多少是零成本复用的。
+    perf = {
+        "chars": len(text),
+        "sentences": total,
+        "chunks": idx,
+        "ms": ms_all,
+        "firstMs": int(t_first * 1000) if t_first else 0,
+        "audioSec": round(audio_sec, 2),
+        "rtf": round((ms_all / 1000.0) / audio_sec, 3) if audio_sec > 0.01 else 0,
+        "cachedSentences": n_cached,
+        "style": style,
+        "ref": ref_name,
+        "at": int(time.time()),
     }
+    STATE["last_stream"] = perf
+    STATE["perf"] = perf
+
+
+def hop_start():
+    """第一跳的粒度（token 数）。25 ≈ 1 秒音频。
+
+    调小它只改变「吐第一块之前要攒多少 token」，不改变合成内容 —— 同一句话
+    换成 12 起步，音色、韵律、咬字完全一样（跳只是分块边界）。代价是早期多
+    几次 flow 调用。用 FISH_FEIYU_HOP0 覆盖，默认沿用模型的 25。
+    """
+    try:
+        return max(6, int(os.environ.get("FISH_FEIYU_HOP0") or STATE.get("hop0") or 25))
+    except Exception:
+        return 25
+
+
+def reset_hop():
+    """把流式首块粒度拨回模型初始值（25 token ≈ 1s 音频 / 一次 yield）。
+
+    模型里的 token_hop_len 是**单调增长**的实例属性：每次流式合成会 25 → 50 → 100，
+    而且合完不复位。也就是说上一段话跑完，下一句的第一块就得凑够 100+pad 个
+    token（约 4 秒音频）才吐第一块 —— 首声被自己的上一句话拖慢，越聊越慢。
+    实测：预热推理之后的一句 6 字，首块 3.91s；同一句在干净进程里 1.5s。
+    每句开跑前拨回 25，就是模型原本设计的「首块小、以后逐次翻倍」。
+    """
+    v = STATE.get("voice")
+    if not v:
+        return
+    try:
+        v.model.token_hop_len = hop_start()
+    except Exception:
+        pass
+
+
+def warm_infer(style, prompt, ref_path, sid, text="嗯，我在呢。"):
+    """真跑一次极短合成，把 kernel / 分配器 / flow 的懒初始化全部提前付掉。
+
+    为什么需要：流式第一跳的 RTF 是整段里最差的（日志里 1.4-1.7，稳定后 0.65-0.9），
+    因为第一次 flow+hift 要走一遍 cuDNN 算法选择、显存分配和 kernel launch 冷路径。
+    这段代价原来落在「用户开口的第一句」上 —— 也就是最不该慢的那一句。
+    预热的这句只合成一次，之后每句话的第一跳都是热路径。
+    """
+    import torch
+    key = (sid or "", style)
+    if STATE.get("warm_sig") == key:
+        return True
+    t0 = time.perf_counter()
+    try:
+        with STATE["lock"], torch.inference_mode():
+            reset_hop()          # 预热也不许把 token_hop_len 抬上去留给第一句
+            n = 0
+            for _x in STATE["voice"].inference_zero_shot(
+                text, prompt, str(ref_path), zero_shot_spk_id=sid,
+                stream=True, speed=1.0, text_frontend=True,
+            ):
+                n += 1
+                if n >= 2:      # 两跳足够走过 token_hop_len 增长和 hift 缓存路径
+                    break
+            reset_hop()          # 预热结束再拨回原位（只增不复位的属性）
+        STATE["warm_sig"] = key
+        log("  预热推理 %.2fs" % (time.perf_counter() - t0))
+        return True
+    except Exception as e:
+        log("  预热推理失败（不影响使用）", "%s: %s" % (type(e).__name__, e))
+        return False
 
 
 def do_warm(payload):
@@ -551,19 +792,40 @@ def do_warm(payload):
         raise RuntimeError(STATE.get("err") or "模型加载失败")
     style = payload.get("style") or "cute"
     use_style(style)
-    manifest = read_manifest() or {}
-    sel = (manifest.get("styles") or {}).get(style)
-    if sel:
-        ref_path = str(PKG / sel["reference_audio"])
-        prompt = STATE["params"]["prompt_prefix"] + sel["reference_text"]
-        sid = _spk_id(style, prompt, ref_path)
+    picked = resolve_ref(style, payload.get("text") or "", prefer=(payload.get("ref") or "").strip() or None)
+    if picked:
+        ref_path, prompt, sid = picked["path"], picked["prompt"], picked["sid"]
         try:
             if sid not in STATE["voice"].frontend.spk2info:
                 t_ref = time.perf_counter()
                 STATE["voice"].add_zero_shot_spk(prompt, ref_path, sid)
-                log("  预热参考音色 %.2fs / %s" % (time.perf_counter() - t_ref, style))
+                log("  预热参考音色 %.2fs / %s" % (time.perf_counter() - t_ref, picked["name"]))
         except Exception as e:
             log("  预热参考音色失败（不影响使用）", "%s: %s" % (type(e).__name__, e))
+            sid = ""
+        # 再真跑一次极短合成：首跳的 cuDNN 算法选择、显存分配、kernel 冷启动
+        # 全部提前付掉，别让它们落在用户听到的第一句上。
+        try:
+            warm_infer(style, prompt, ref_path, sid)
+        except Exception:
+            pass
+    else:
+        log("  预热跳过：没有可用的参考音频")
+    # 参考音色一次全抽：情绪的挑选是逐句变的（小鲸鱼+撒娇 / 可爱 / 温柔…），
+    # 每次换一条原来都要在请求里花 0.4s 抽特征，现在全在后台付掉。
+    prefix = (STATE.get("params") or {}).get("prompt_prefix", "")
+    n_ok = 0
+    for r in scan_refs():
+        try:
+            p = prefix + r["text"]
+            s = _spk_id(style, p, r["path"])
+            if s not in STATE["voice"].frontend.spk2info:
+                STATE["voice"].add_zero_shot_spk(p, r["path"], s)
+            n_ok += 1
+        except Exception as e:
+            log("  参考音色预抽跳过 %s" % r.get("name"), "%s: %s" % (type(e).__name__, e))
+    if n_ok:
+        log("  参考音色已全部预抽 %d 条（逐句切换不再抽特征）" % n_ok)
     ms = int((time.perf_counter() - t0) * 1000)
     log("预热完成 %dms / %s / fp16=%s" % (ms, style, STATE.get("fp16")))
     return {"ok": True, "ms": ms, "style": style,
@@ -644,17 +906,10 @@ def do_tts(payload):
         manifest = read_manifest() or {}
         if style not in manifest.get("styles", {}):
             return {"ok": False, "error": "未知声线 %s" % style}, 400
-        if picked:
-            # 文件夹里的参考音频：文本从同名 .txt 读，走 zero_shot
-            ref_path = picked["path"]
-            prompt = STATE["params"]["prompt_prefix"] + picked["text"]
-            ref_name = picked["name"]
-        else:
-            # 没配文件夹 → 退回 manifest 里写死的预设
-            sel = manifest["styles"][style]
-            ref_path = str(PKG / sel["reference_audio"])
-            prompt = STATE["params"]["prompt_prefix"] + sel["reference_text"]
-            ref_name = style
+        rr = resolve_ref(style, text, prefer=want_ref or None)
+        if not rr:
+            return {"ok": False, "error": "没有可用的参考音频"}, 500
+        ref_path, prompt, ref_name = rr["path"], rr["prompt"], rr["name"]
 
         t0 = time.perf_counter()
         log("合成 text=%r prompt=%r ref=%s" % (text[:30], prompt[:40], ref_path))
@@ -780,6 +1035,7 @@ class H(BaseHTTPRequestHandler):
                 "device": STATE["device"], "styles": STATE["styles"],
                 "invocations": STATE["invocations"],
                 "refs": len(refs), "refdir": str(REFDIR),
+                "perf": STATE.get("perf") or None,
             })
         if u.path == "/refs":
             # 给设置界面用：文件夹里有哪些参考音频、每条对应什么文字、多长
