@@ -3,7 +3,7 @@
 ![大肥鱼](docs/images/hero.png)
 
 <p>
-  <img src="https://img.shields.io/badge/version-1.6.5-6C8CFF" alt="version 1.6.5">
+  <img src="https://img.shields.io/badge/version-1.6.6-6C8CFF" alt="version 1.6.6">
   <img src="https://img.shields.io/badge/platform-Windows%2010%20%2F%2011%20x64-4C9AFF" alt="Windows 10 / 11 x64">
   <img src="https://img.shields.io/badge/%E6%9C%AC%E6%9C%BA%E5%A3%B0%E7%BA%BF-%E4%B8%8D%E9%87%87%E9%9B%86%E4%B8%8D%E4%B8%8A%E4%BC%A0-35B37E" alt="本机声线">
 </p>
@@ -73,6 +73,7 @@ Windows 桌面上的 Live2D 挂件：她跟着鼠标看、被摸头会害羞，�
   约 **887.5 MB**（语音模型和运行环境都在里面，装完不用再下东西）。
 - 校验：`Get-FileHash .\大肥鱼-1.6.5-安装包.exe -Algorithm SHA256`
   → `E7C1771B11EE3583C4FE1B94F6E29372E7DA74597DD3FFE6420F67B2F671D597`
+- 1.6.6 只改了代码（看屏幕的用量收敛），没有重新打包：安装包还是上面这个 1.6.5，想看屏幕的修复要等下一次打包的版本。
 - **不捆绑模型**：Cubism 模型按版权单独分发。程序自带一只「大肥鱼」，换成你自己的模型走设置里的
   [模型适配器](docs/模型适配器-使用说明.md)（导入 zip，取景、动作、表情、点击分区都在里面调）。
 - 绿色使用：安装器是 NSIS，卸载会清干净；配置和聊天记录都在用户数据目录，

@@ -211,6 +211,8 @@ export class SdkRunner {
       this.sessionId = sid;
     }
     emit({ type: 'session', sessionId: sid });
+    // onSession 以前只声明没调用：上层（看屏幕）拿不到会话号，只好每轮新开一个。
+    try { onSession && onSession(sid); } catch {}
 
     let usage = null;
     let code = 0;

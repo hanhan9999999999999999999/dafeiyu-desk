@@ -39,27 +39,125 @@ const EFFORT = process.env.FISH_DSH_EFFORT || 'low';
 const PROFILE = (() => {
   const forced = argOf('--profile', process.env.PHONE_DSH_PROFILE || '');
   if (forced) return forced;
-  const dir = path.join(process.env.DSH_HOME || path.join(os.homedir(), '.dsh'), 'profiles');
+  // 大肥鱼是独立的 Electron 进程，未必继承到 DSH_HOME；DSH 搬过盘之后它默认的
+  // ~/.dsh 里可能只剩旧的 profile 集合，挑不到能跑 stdio JSON-RPC 的那套。
+  // 所以几个候选根都看一遍：先按 want 顺序跨根找（phone-sdk 优先），找到就把
+  // 该根写回 process.env.DSH_HOME，好让 spawn 出去的 DSH 子进程用同一个根。
+  const roots = [
+    process.env.DSH_HOME,
+    path.join(os.homedir(), '.dsh'),
+    'D:\\dsh-home',
+    'C:\\dsh-home',
+  ].filter(Boolean);
   const want = ['phone-sdk', 'phone-lite', 'headless', 'desktop', 'web'];
   for (const name of want) {
-    try { if (fs.existsSync(path.join(dir, name))) return name; } catch (e) { }
+    for (const root of roots) {
+      try {
+        if (fs.existsSync(path.join(root, 'profiles', name))) {
+          process.env.DSH_HOME = root;
+          return name;
+        }
+      } catch (e) { }
+    }
   }
   // 一个都没有就用第一个找到的；再没有就交给 DSH 报错
-  try {
-    const all = fs.readdirSync(dir).filter((x) => !x.startsWith('_'));
-    if (all.length) return all[0];
-  } catch (e) { }
+  for (const root of roots) {
+    try {
+      const all = fs.readdirSync(path.join(root, 'profiles')).filter((x) => !x.startsWith('_'));
+      if (all.length) { process.env.DSH_HOME = root; return all[0]; }
+    } catch (e) { }
+  }
   return '';
 })();
 const TOKEN = process.env.FISH_BRIDGE_TOKEN || crypto.randomBytes(9).toString('hex');
 const MAX_MESSAGES = 200;
 
+// ---------- 落盘目录 ----------
+// 迷你桥是子进程，拿不到 Electron 的 app.getPath('userData')，所以由大肥鱼
+// 主进程把同一个目录经 FISH_STATE_DIR 传进来；单独跑桥时按平台兜底。
+const DATA_DIR = (() => {
+  const forced = String(process.env.FISH_STATE_DIR || '').trim();
+  if (forced) return forced;
+  if (process.platform === 'win32') {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'dafeiyu-desk');
+  }
+  return path.join(os.homedir(), '.dafeiyu-desk');
+})();
+
+function readJson(file, dflt) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (e) { return dflt; }
+}
+
+// 先写 .tmp 再改名：写到一半被关机/杀掉，也不会留下半个坏文件。
+function writeJson(file, data) {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = file + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(data), 'utf8');
+    fs.renameSync(tmp, file);
+    return true;
+  } catch (e) {
+    try { console.log('[mini] 写不了 ' + file + ': ' + String((e && e.message) || e)); } catch (e2) { }
+    return false;
+  }
+}
+
+// ---------- 看屏幕的会话（跨重启复用）----------
+// 以前这个号只活在内存里：桥一退就没了，下次必然开一个全新会话；而全新会话的
+// 第一轮要把整份系统提示按未命中重算一遍（约 9.6k token）。程序重启 26 次，
+// 就是 26 个新会话、26 次全价首轮。存进文件，重启也能接着 resume。
+const VISION_STATE_FILE = path.join(DATA_DIR, 'vision-session.json');
+// 也不能无限续：上下文一路涨，到了上限 DSH 会自己压缩历史，那一次是整段重算，
+// 比换新会话还贵。所以按「看了几眼 / 上下文多大 / 隔了多久」主动换。
+const VISION_MAX_TURNS = 40;              // 最多看 40 眼
+const VISION_MAX_CTX = 60000;             // 上下文到 6 万 token 就换
+const VISION_MAX_AGE = 6 * 3600 * 1000;   // 隔了 6 小时以上，旧会话没续的必要
+
+function readVisionState() {
+  const j = readJson(VISION_STATE_FILE, null);
+  if (!j || typeof j !== 'object') return { id: '', turns: 0, ctx: 0, at: 0 };
+  return {
+    id: typeof j.id === 'string' ? j.id : '',
+    turns: Number(j.turns) || 0,
+    ctx: Number(j.ctx) || 0,
+    at: Number(j.at) || 0,
+  };
+}
+let visionState = readVisionState();
+function saveVisionState() { return writeJson(VISION_STATE_FILE, visionState); }
+
+// 到点了就丢掉旧号，下一眼自然开新会话（也只有这一眼付首轮的钱）。
+function rotateVisionIfStale() {
+  if (!visionState.id) return false;
+  const now = Date.now();
+  let why = '';
+  if (visionState.turns >= VISION_MAX_TURNS) why = '已经看了 ' + visionState.turns + ' 眼';
+  else if (visionState.ctx >= VISION_MAX_CTX) why = '上下文涨到 ' + visionState.ctx + ' 了';
+  else if (visionState.at && now - visionState.at > VISION_MAX_AGE) {
+    why = '上次看屏幕是 ' + Math.round((now - visionState.at) / 3600000) + ' 小时前';
+  }
+  if (!why) return false;
+  log('看屏幕会话换新（' + why + '）：' + visionState.id);
+  visionState = { id: '', turns: 0, ctx: 0, at: 0 };
+  saveVisionState();
+  return true;
+}
+
 // ---------- 用量账本 ----------
 // DSH 每一轮的 token 只在 session.event 里（assistant/message 带 usage），
 // 而大肥鱼主进程拿不到那些事件 —— 所以这里留一份，等它来问 /api/usage。
 // 各家字段名不统一（camelCase / snake_case 都有），取值一律走 pickNum 兜一圈。
-const usageTurns = [];
+// 这份账本以前只在内存里：桥一重启（今天就 26 次）全部清空，主进程那一次没拉到
+// 就永远丢了——设置页里看到的数因此偏小。现在落盘，重启接着攒，主进程按 id 去重。
 const USAGE_MAX = 500;
+const USAGE_FILE = path.join(DATA_DIR, 'bridge-usage.json');
+const usageTurns = (() => {
+  const j = readJson(USAGE_FILE, null);
+  if (!Array.isArray(j)) return [];
+  return j.filter((t) => t && t.id && Number(t.at)).slice(-USAGE_MAX);
+})();
 
 function pickNum(o, keys) {
   for (const k of keys) {
@@ -87,6 +185,7 @@ function noteUsage(usage, model) {
   };
   usageTurns.push(t);
   if (usageTurns.length > USAGE_MAX) usageTurns.splice(0, usageTurns.length - USAGE_MAX);
+  writeJson(USAGE_FILE, usageTurns);
   return t;
 }
 
@@ -171,7 +270,7 @@ function push(role, text) {
 const found = findDsh();
 let runner = null;
 let visionRunner = null;
-let visionSessionId = '';
+// 看屏幕的会话号不再用内存变量：它现在存在 vision-session.json 里（见文件头部）。
 
 async function getRunner() {
   if (runner && runner.alive) return runner;
@@ -382,6 +481,29 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true, id: crypto.randomUUID() });
   }
 
+  // 看屏幕的会话状态：诊断用——号还在不在、看了几眼、上下文多大。
+  if (p === '/api/vision/state') {
+    return json(res, 200, {
+      ok: true,
+      session: visionState.id || '',
+      turns: Number(visionState.turns) || 0,
+      ctx: Number(visionState.ctx) || 0,
+      at: Number(visionState.at) || 0,
+      file: VISION_STATE_FILE,
+      usageTurns: usageTurns.length,
+    });
+  }
+
+  // 「叫醒」看屏幕那条通道：主进程只在大肥鱼真的打开监视窗时才打这个。
+  // 取代原来「迷你桥一启动就预热」——那样每次重启都要白起一个 DSH 子进程 + 新会话。
+  if (p === '/api/vision/warm' && (req.method === 'POST' || req.method === 'GET')) {
+    if (!found) return json(res, 200, { ok: false, error: '这台机器上没找到 DSH' });
+    getVisionRunner()
+      .then(() => json(res, 200, { ok: true, session: visionState.id || '', turns: Number(visionState.turns) || 0 }))
+      .catch((e) => json(res, 200, { ok: false, error: String((e && e.message) || e) }));
+    return;
+  }
+
   // 看屏幕：收一张 dataURL 截图，交给独立的 DSH 会话看，再把一句话带回来。
   // 用独立 runner / 独立 session，避免把「看屏幕」的提问混进聊天记录。
   if (p === '/api/vision' && req.method === 'POST') {
@@ -396,25 +518,47 @@ const server = http.createServer(async (req, res) => {
     const prompt = String(j.prompt || '').trim();
     if (!data) return json(res, 400, { ok: false, error: '没有图片' });
     if (!prompt) return json(res, 400, { ok: false, error: '没有提示词' });
+    const startedAt = Date.now();
     try {
+      // 该换会话了就换（看满 40 眼 / 上下文 6 万 / 隔了 6 小时）
+      rotateVisionIfStale();
       const vr = await getVisionRunner();
       let texts = [];
       const r = await vr.runTurn({
         text: prompt,
         image: { data, mimeType },
-        sessionId: visionSessionId || undefined,
-        onSession: (sid) => { visionSessionId = sid; },
+        // 有存下来的号就一直 resume 它：同一个会话里历史全在缓存，只加一张图。
+        sessionId: visionState.id || undefined,
+        onSession: (sid) => {
+          if (!sid) return;
+          if (sid !== visionState.id) {
+            // 换号了（第一次建会话，或者 DSH 那边没续上）——计数从零开始
+            if (visionState.id) log('看屏幕换了会话: ' + visionState.id + ' → ' + sid);
+            visionState.id = sid;
+            visionState.turns = 0;
+            visionState.ctx = 0;
+          }
+          visionState.at = Date.now();
+          saveVisionState();
+        },
         onEvent: (ev) => {
           if (ev.type === 'text' && ev.text) texts.push(String(ev.text));
-          // 看屏幕也是一次真实的模型调用，同样要记进用量。
-          if (ev.type === 'status' && ev.phase === 'turn_end') noteUsage(ev.usage, MODEL + ' · 看屏幕');
+          // 看屏幕也是一次真实的模型调用，同样要记进用量、同样要记上下文水位。
+          if (ev.type === 'status' && ev.phase === 'turn_end') {
+            noteUsage(ev.usage, MODEL + ' · 看屏幕');
+            const used = pickNum(ev.usage, ['contextTokens', 'context_tokens', 'inputTokens', 'input_tokens', 'promptTokens', 'prompt_tokens', 'totalTokens', 'total_tokens']);
+            if (used) visionState.ctx = used;
+            visionState.turns = (Number(visionState.turns) || 0) + 1;
+            visionState.at = Date.now();
+            saveVisionState();
+          }
         },
       });
       // runner 可能同时推 attempt（半成品）和 message（定稿）；取最长的那份。
       let text = texts.sort((a, b) => b.length - a.length)[0] || '';
       text = text.replace(/^["“」『]+|["”」』]+$/g, '').replace(/\s+/g, ' ').trim();
       if (!text) return json(res, 502, { ok: false, error: (r && r.error) || '视觉模型没有给出内容（模型支持图片吗？）' });
-      return json(res, 200, { ok: true, text, model: MODEL, ms: 0 });
+      return json(res, 200, { ok: true, text, model: MODEL, ms: Date.now() - startedAt, session: visionState.id || '', turns: visionState.turns || 0 });
     } catch (e) {
       const msg = String((e && e.message) || e);
       log('看屏幕失败:', msg);
@@ -475,16 +619,16 @@ if (__ppid && __ppid > 0) {
 server.listen(PORT, '0.0.0.0', () => {
   log(`迷你桥接已启动 http://127.0.0.1:${PORT}`);
   log('配对码: ' + TOKEN);
+  log('数据目录: ' + DATA_DIR);
   if (found) {
     log('DSH: ' + found.bin);
     log('node: ' + found.node);
-    // 看屏幕用的是独立会话；第一轮冷启动要几十秒。空闲时先在后台把它叫醒，
-    // 等主人点「看屏幕」时第一句点评就不用再等进程初始化。
-    setTimeout(() => {
-      getVisionRunner()
-        .then(() => log('看屏幕会话预热完成'))
-        .catch((e) => log('看屏幕会话预热失败: ' + String((e && e.message) || e)));
-    }, 6000).unref?.();
+    // 这里不再预热。以前每次启动都白起一个 DSH 子进程 + 一个新会话（程序今天
+    // 重启 26 次 = 26 个），而用户可能一眼都没看。现在等大肥鱼真的打开监视窗时
+    // 打 POST /api/vision/warm 再叫醒。
+    if (visionState.id) {
+      log('看屏幕会话沿用: ' + visionState.id + '（已看 ' + (visionState.turns || 0) + ' 眼，上下文 ' + (visionState.ctx || 0) + '）');
+    }
   } else {
     log('没找到 DSH —— 健康检查会一直报错，装好 DSH 再启动就行');
   }

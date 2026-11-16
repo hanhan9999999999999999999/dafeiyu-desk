@@ -634,7 +634,9 @@ async function miniStart() {
     return miniStatus();
   }
   const isElectron = /electron|大肥鱼/i.test(path.basename(process.execPath));
-  const env = { ...process.env, FISH_BRIDGE_PORT: String(MINI_PORT) };
+  // 桥是子进程，拿不到 app.getPath；把同一个 userData 传下去，
+  // 看屏幕的会话号与桥的用量账本才会落在大肥鱼自己的数据目录里，重启也不丢。
+  const env = { ...process.env, FISH_BRIDGE_PORT: String(MINI_PORT), FISH_STATE_DIR: app.getPath("userData") };
   // Electron 当 node 用时必须显式说明，否则它会按 GUI 主进程解析脚本
   if (isElectron) env.ELECTRON_RUN_AS_NODE = "1";
   try {
@@ -2834,6 +2836,12 @@ let seeLastAnalyze = 0;
 let seeLastError = "";
 let seeLastComment = "";
 let seeLastCommentAt = 0;
+// 连着几眼都是「动了一点」的普通画面（打字、滚文档）时，这个数往上涨，间隔跟着拉长。
+let seeQuiet = 0;
+// 最近一小时内真正问过模型的时刻，用来卡每小时上限。
+let seeHourHits = [];
+// 上一次走通的是哪条通道（"mini" / "phone"），下次优先走它。
+let seeChannel = "";
 
 function seeBoundsFile() {
   return path.join(app.getPath("userData"), "see-bounds.json");
@@ -2859,6 +2867,9 @@ function seeConfig() {
     model: String(s.seeModel || s.apiModel || "").trim(),
     interval: Math.max(0.8, Math.min(6, Number(s.seeInterval) || 1.6)),
     gap: Math.max(3, Math.min(60, Number(s.seeGap) || 7)),
+    // 每小时最多问几次模型。画面一直在动的时候光靠 gap 拦不住：
+    // 一小时 60 次、每次一万多上下文，用量就是这么涨上去的。
+    maxPerHour: Math.max(6, Math.min(600, Number(s.seeMaxPerHour) || 60)),
     speak: !!s.seeSpeak,
   };
 }
@@ -2878,6 +2889,11 @@ function seeStatus() {
     lastError: seeLastError,
     lastComment: seeLastComment,
     lastCommentAt: seeLastCommentAt,
+    // 这一小时问了几次 / 上限多少、退避到第几级、现在走哪条通道
+    perHour: seeHourHits.length,
+    maxPerHour: c.maxPerHour,
+    quiet: seeQuiet,
+    channel: seeChannel,
     hasVision: !!(miniStatus().running || (c.base && c.model)),
   };
 }
@@ -3039,24 +3055,33 @@ async function seeAnalyze(dataUrl, diff) {
   const preferHttp = !!String(s.seeBase || "").trim();
   if (!preferHttp) {
     let lastErr = null;
-    // 1) 先走主人自己的 phone-bridge（8899）：支持带图发消息，这台机器上真正可用的一条
-    try {
-      let text = await seeViaPhoneBridge(prompt, dataUrl);
-      text = text.replace(/^["“「」『]+|["”」』]+$/g, "").replace(/\s+/g, " ").trim();
-      if (text) {
-        if (text.length > 180) text = text.slice(0, 178) + "…";
-        return { text, model: "DSH 桥接", diff };
-      }
-    } catch (e) { lastErr = e; }
-    // 2) 再试自带的 /api/vision（开发态才有）
-    try {
-      let text = await seeViaBridge(prompt, dataUrl);
-      text = text.replace(/^["“「」『]+|["”」』]+$/g, "").replace(/\s+/g, " ").trim();
-      if (text) {
-        if (text.length > 180) text = text.slice(0, 178) + "…";
-        return { text, model: "DSH 本地", diff };
-      }
-    } catch (e) { if (!lastErr) lastErr = e; }
+    // 走哪条桥要先看清楚：设置里的「桥接地址」如果就指着自带的迷你桥（8898），
+    // 那条路上根本没有 /api/upload —— 以前每一眼都先白失败一次再回退，
+    // 75 秒的超时还挡在中间。现在先比 host，再记住上次走通的那条。
+    const bridgeHost = (() => {
+      try { return new URL(String(s.bridgeUrl || "")).host; } catch (e) { return ""; }
+    })();
+    let miniHost = "";
+    try { miniHost = new URL(miniStatus().url).host; } catch (e) { }
+    const phoneIsMini = !!bridgeHost && !!miniHost && bridgeHost === miniHost;
+    const defaultOrder = phoneIsMini ? ["mini", "phone"] : ["phone", "mini"];
+    const order = seeChannel === "mini" ? ["mini", "phone"]
+      : seeChannel === "phone" ? ["phone", "mini"]
+        : defaultOrder;
+
+    for (const ch of order) {
+      try {
+        let text = ch === "mini"
+          ? await seeViaBridge(prompt, dataUrl)
+          : await seeViaPhoneBridge(prompt, dataUrl);
+        text = String(text || "").replace(/^["“「」『]+|["”」』]+$/g, "").replace(/\s+/g, " ").trim();
+        if (text) {
+          seeChannel = ch;
+          if (text.length > 180) text = text.slice(0, 178) + "…";
+          return { text, model: ch === "mini" ? "DSH 本地" : "DSH 桥接", diff };
+        }
+      } catch (e) { if (!lastErr) lastErr = e; }
+    }
     if (!c.base || !c.model) {
       const raw = String((lastErr && lastErr.message) || lastErr || "");
       // 把一个英文字段名译成人话；接口没配的时候用户不该看见 not found / 404 这种原文
@@ -3142,12 +3167,24 @@ async function seeTick(force) {
 
     const c = seeConfig();
     const now = Date.now();
-    const gapMs = c.gap * 1000;
-    const bigChange = diff >= 0.09 && now - seeLastAnalyze >= 3000;
-    const smallChange = diff >= 0.02 && now - seeLastAnalyze >= gapMs;
+    // 自适应退避：连着几眼都是「动了一点」的普通画面，间隔就按级数往后拖。
+    // seeQuiet 每级 +1.5 倍，最多 6 倍 —— 静态桌面不该每 7 秒烧一次上下文。
+    const gapMs = c.gap * 1000 * Math.min(6, 1 + seeQuiet * 1.5);
+    // 阈值也抬一档：0.02（2% 像素变化）几乎等于光标闪一下，不值得问模型。
+    const bigChange = diff >= 0.12 && now - seeLastAnalyze >= 5000;
+    const smallChange = diff >= 0.035 && now - seeLastAnalyze >= gapMs;
     if (!force && !bigChange && !smallChange) return { ok: true, skipped: true, diff };
 
+    // 每小时硬预算：到点了也照样刷新画面，只是这一眼不问了。
+    seeHourHits = seeHourHits.filter((t) => now - t < 3600 * 1000);
+    if (!force) {
+      if (seeHourHits.length >= c.maxPerHour) return { ok: true, skipped: true, diff, budget: true };
+      seeHourHits.push(now);
+    }
+
     seeLastAnalyze = now;
+    // 这一眼几乎没变 → 退避加一级；有明显变化 → 立刻回到最快节奏。
+    seeQuiet = force ? 0 : (diff < 0.08 ? Math.min(4, seeQuiet + 1) : 0);
     const r = await seeAnalyze(f.dataUrl, diff);
     seeLastError = "";
     seeLastComment = r.text;
@@ -3170,6 +3207,8 @@ function seeStart() {
   seeRunning = true;
   seeLastSig = null;
   seeLastError = "";
+  seeQuiet = 0;
+  seeHourHits = [];
   const c = seeConfig();
   // 先抓一帧，别让监视窗空着。
   seeTick(true);
@@ -3192,7 +3231,22 @@ function closeSeeWatch() {
   seeWin = null;
 }
 
+// 用户真的打开「看屏幕」了，才去把桥那条视觉通道叫醒。
+// 以前是桥一启动就预热 6 秒 —— 每次重启都白起一个 DSH 子进程 + 一个新会话，
+// 而用户可能一眼都没看。这里不等结果，失败也不吭声（第一眼自己会去连）。
+function seeWarmBridge() {
+  try {
+    const st = miniStatus();
+    if (!st.running) return;
+    net.fetch(st.url + "/api/vision/warm", { method: "POST" })
+      .then((r) => r.json())
+      .then((j) => { if (j && j.ok) log("[see] 视觉桥已就绪"); })
+      .catch(() => { });
+  } catch (e) { }
+}
+
 function openSeeWatch() {
+  seeWarmBridge();
   if (seeWin && !seeWin.isDestroyed()) {
     seeWin.show();
     seeWin.focus();

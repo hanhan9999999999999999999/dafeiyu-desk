@@ -1,5 +1,68 @@
 # 更新日志
 
+## 1.6.6 — 2026-11-16 看屏幕不再每轮新开会话，用量收敛
+
+只动「看屏幕」这一条链路的成本，不动交互。版本号从 1.6.5 升到 1.6.6（更新检查靠它判断新旧），这一版没有重新打包，安装包仍然是 1.6.5。
+
+### 症状与病根
+
+单轮其实不贵（input 250–450）。贵在**频次**和**每次都开一个新会话**——查出来五处：
+
+1. `bridge/runner-sdk.mjs` 的 `runTurn()` 声明了 `onSession` 回调，可全文件没有一处调用它。
+   桥每轮只能拿到自己刚生成的 `session-<uuid>`，上层记不住 → 每轮都是新会话。这是最靠前的一层。
+2. 桥把会话号只放在内存（`visionSessionId`）里，进程一退就丢 → 大肥鱼重启一次，看屏幕就换一次会话。
+3. 桥 `server.listen` 之后 `setTimeout(..., 6000)` 无条件预热：用户一眼都没看，也白起一个 DSH 子进程 + 一个新会话。
+4. 设置里的桥接地址就指着自带的迷你桥（8898），而那条路只有 `/api/vision`、没有 `/api/upload`；
+   `seeAnalyze` 却总是先试 `/api/upload`，于是每一眼都先白失败一次，75 秒超时还挡在中间。
+5. 看屏幕的用量只记在桥的内存里（`usageTurns`）。`noteUsage` 明明打了 `· 看屏幕` 标签，却进不了主账本 `usage.json`。
+
+### 改了什么
+
+**`bridge/runner-sdk.mjs`**
+- `emit({ type: 'session', sessionId: sid })` 之后补 `try { onSession && onSession(sid); } catch {}`——
+  会话号终于能被上层接住。
+
+**`bridge/mini-bridge.mjs`**
+- 新增 `FISH_STATE_DIR`（兜底 `%APPDATA%/dafeiyu-desk`）与 `readJson/writeJson`（先写 `.tmp` 再 rename），
+  `vision-session.json` 落盘 `{ id, turns, ctx, at }`，启动即读、每次换号/收轮都写。
+- 会话轮换：`turns ≥ 40`、`ctx ≥ 60000`、或 `age ≥ 6h` 就主动换新，并写一行日志说明为什么换。
+- 新增 `GET /api/vision/state`、`GET|POST /api/vision/warm`；删掉启动后 6 秒的无条件预热。
+- `/api/vision` 的响应补上真实的 `ms`（此前写死 `0`）、`session`、`turns`。
+- 用量账本 `bridge-usage.json` 从内存搬上盘，看屏幕的每轮都记进 `/api/usage`（带 `· 看屏幕` 标签）。
+- **profile 解析跨根**：大肥鱼是独立 Electron 进程，未必继承到 `DSH_HOME`（`reg query` 两处都查不到，
+  它只存在于本会话被注入的环境），而 DSH 搬到 D 盘后 `C:\Users\Administrator\.dsh\profiles` 只剩
+  `desktop`、`phone-lite`。现在按 `[DSH_HOME, ~/.dsh, D:\dsh-home, C:\dsh-home]` 跨根找 phone-sdk 优先的
+  profile，命中后把这个根写回 `process.env.DSH_HOME`，子进程用同一个根。
+
+**`src/main.js`**
+- `seeConfig()` 新增 `maxPerHour`（默认 60，夹在 6–600）：到点了照样刷新画面，只是这一眼不问模型。
+- `seeTick` 自适应退避：`gapMs = gap * 1000 * min(6, 1 + seeQuiet * 1.5)`，`seeQuiet` 每「几乎没变」加一级、
+  有明显变化立刻归零；阈值也抬了一档（`bigChange` 0.09→0.12 且间隔 3s→5s，`smallChange` 0.02→0.035）。
+- `seeAnalyze` 先比 host 再记住上次走通的那条通道：桥接地址就是迷你桥时先走 `/api/vision`，
+  不再每眼白试 `/api/upload`。
+- 打开「看屏幕」时才 `seeWarmBridge()` 按需预热，失败不吭声（第一眼自己会去连）。
+- 桥的 env 补 `FISH_STATE_DIR: app.getPath("userData")`——会话号与账本落在大肥鱼自己的数据目录里。
+
+### 实测（`FISH_STATE_DIR` 指临时目录，端口 8901/8902）
+
+- 预热：`>60s` 不返回 → **2.2s** 返回。
+- 连打两轮：`session-df455fa1-…`，`turns 1 → 2`，`ctx 697 → 419`，`/api/usage` 两条 `deepseek-flash · 看屏幕`。
+- kill 桥再起：`/api/vision/state` 立刻回同一个号，第三轮仍是它（`turns:3`）→ **「重启即换会话」消失**。
+- 预置 `turns:40` 再打：换到 `session-6a8048e3-…`、`turns` 归 1，文件同步 → 轮换生效。
+- **不设 `DSH_HOME`** 再起一次：仍选中 `phone-sdk`，沿用旧号，日志打印「看屏幕会话沿用」。
+- `node --check` 三个文件全过；`git diff --ignore-cr-at-eol` 真实改动 +242 / −42（整文件 diff 是仓库本来就存 LF、工作区是 CRLF，不是重写）。
+
+### 配套与还原
+
+- 新增 profile `D:\dsh-home\profiles\phone-sdk\`：phone-lite 的精简副本，`cordis.patch.yml` 只留
+  模型（`deepseek-account` / `deepseek-flash` / `reasoningEffort: low`）、账号、权限，
+  并 `insert` 了 `@deepseek-ai/dsh-sdk-jsonrpc-server`——stdin 上的 stdio JSON-RPC 靠它，缺它时
+  桥 `initialize` 永远等不到应答（这才是「DSH 子进程起来了却一个字不回」的原因）。
+- 备份：`D:\备份\20261116-194049-live2d-看屏幕会话复用\`（`mini-bridge.mjs`、`src/main.js`、
+  `userdata/settings.json`、`userdata/usage.json`）与 `D:\备份\20261116-195500-live2d-onsession\`
+  （`bridge/runner-sdk.mjs`）。还原=把文件拷回原路径。
+- 生效方式：**下次启动大肥鱼**即可，无需改设置。
+
 ## 1.6.5 — 2026-11-16
 
 2026-11-16 · 安装包 `大肥鱼-1.6.5-安装包.exe`，930,570,305 B（约 887.5 MB），
