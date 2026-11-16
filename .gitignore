@@ -111,3 +111,4 @@ DeepSeek Live2D Model/psd/
 .ui-shots/*.ps1
 .ui-shots/rel-id.txt
 .ui-shots/shot-*.mjs
+.ui-shots/*.log
