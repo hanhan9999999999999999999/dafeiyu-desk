@@ -195,6 +195,13 @@ async function rvcStart() {
     rvcProc.stdout.on("data", (b) => { try { log("[rvc] " + b.toString("utf8").trim()); } catch (e) { } });
     rvcProc.stderr.on("data", (b) => { try { const s = b.toString("utf8").trim(); if (s) log("[rvc!] " + s.slice(0, 300)); } catch (e) { } });
     rvcProc.on("exit", (code) => { log("[main] RVC 服务退出 code=" + code); rvcProc = null; });
+    // spawn 失败是异步 'error' 事件，不接住就落到 uncaughtException：记录里只有一条
+    // 语气奇怪的崩溃，状态机却以为进程已经起来了，用户看到「已启动」却永远没声音。
+    rvcProc.on("error", (e) => {
+      rvcLastError = "RVC 服务起不来：" + String((e && e.message) || e);
+      log("[rvc!] " + rvcLastError);
+      rvcProc = null;
+    });
     log("[main] RVC 服务启动 " + py + " device=" + device);
   } catch (e) {
     rvcLastError = String(e && e.message || e);
@@ -372,12 +379,37 @@ function isLoopbackUrl(u) {
 // 设置一变，两个窗口都要知道。以前只发给主窗口（win），设置页的输入框留着旧值，
 // 下一次保存又把旧值写回磁盘 —— 主进程刚把 bridgeUrl 指到自带桥，就被它改回 8899，
 // 于是「外部桥不通 → 指到自带桥 → 又被写回 8899」无限循环，语音永远 Failed to fetch。
+// 密钥只在主进程里以明文存在。设置页只需要知道「存过没有」，不需要看见 key 本身：
+// 它拿到的是掩码（sk-••••4f2a），输入框原样显示；用户不碰它就不算改动。
+// 主窗口不掩码：voice.js 在渲染进程里直接打 API，拿不到 key 就说不了话。
+function maskSecret(v) {
+  const t = String(v || "");
+  if (!t) return "";
+  if (t.length <= 8) return "••••••";
+  return t.slice(0, 3) + "••••" + t.slice(-4);
+}
+
+function forSettingsWindow(s) {
+  const out = { ...s };
+  let masked = false;
+  for (const k of SECRET_KEYS) {
+    if (out[k]) { out[k] = maskSecret(out[k]); masked = true; }
+  }
+  out.secretsMasked = masked;
+  return out;
+}
+
+// 掩码长这样：•••• 出现在值里就说明「这是给人看的，不是密钥」。
+function looksMasked(v) {
+  return typeof v === "string" && v.indexOf("••") >= 0;
+}
+
 function broadcastSettings() {
   const s = S.get();
   for (const w of [win, settingsWin]) {
     try {
       if (w && !w.isDestroyed() && w.webContents && !w.webContents.isDestroyed()) {
-        w.webContents.send("settings-changed", s);
+        w.webContents.send("settings-changed", w === settingsWin ? forSettingsWindow(s) : s);
       }
     } catch (e) { }
   }
@@ -620,6 +652,12 @@ async function miniStart() {
       miniLastError = t.slice(0, 300);
       log("[bridge!] " + miniLastError);
     });
+    miniProc.on("error", (e) => {
+      miniLastError = "自带桥接起不来：" + String((e && e.message) || e);
+      log("[bridge!] " + miniLastError);
+      miniProc = null;
+      miniAnswering = false;
+    });
     miniProc.on("close", (code) => {
       const mine = miniStopping;
       miniStopping = false;
@@ -729,6 +767,10 @@ async function rvcSetupStart() {
       for (const l of lines) if (l.trim()) push(l.trim());
     });
     rvcSetupProc.stderr.on("data", (b) => { try { const s = b.toString("utf8").trim(); if (s) push("[!] " + s.slice(0, 400)); } catch (e) { } });
+    rvcSetupProc.on("error", (e) => {
+      push("[error] 安装进程起不来：" + String((e && e.message) || e));
+      rvcSetupProc = null;
+    });
     rvcSetupProc.on("exit", (code) => {
       push(code === 0 ? "[done] 安装完成，可以启动 RVC 了" : "[error] 安装退出，code=" + code);
       rvcSetupProc = null;
@@ -804,6 +846,10 @@ async function xttsSetupStart() {
       for (const l of lines) if (l.trim()) push(l.trim());
     });
     xttsSetupProc.stderr.on("data", (b) => { try { const s = b.toString("utf8").trim(); if (s) push("[!] " + s.slice(0, 400)); } catch (e) { } });
+    xttsSetupProc.on("error", (e) => {
+      push("[error] 安装进程起不来：" + String((e && e.message) || e));
+      xttsSetupProc = null;
+    });
     xttsSetupProc.on("exit", (code) => {
       push(code === 0 ? "[done] XTTS 装好了，切到 XTTS 就能用" : "[error] 安装退出，code=" + code);
       xttsSetupProc = null;
@@ -890,6 +936,10 @@ async function feiyuSetupStart() {
       for (const l of lines) if (l.trim()) push(l.trim());
     });
     feiyuSetupProc.stderr.on("data", (b) => { try { const s = b.toString("utf8").trim(); if (s) push("[!] " + s.slice(0, 400)); } catch (e) { } });
+    feiyuSetupProc.on("error", (e) => {
+      push("[error] 安装进程起不来：" + String((e && e.message) || e));
+      feiyuSetupProc = null;
+    });
     feiyuSetupProc.on("exit", (code) => {
       push(code === 0 ? "[done] 飞鱼装好了，切到飞鱼就能用" : "[error] 安装退出，code=" + code);
       feiyuSetupProc = null;
@@ -999,7 +1049,7 @@ ipcMain.on("renderer:error", (e, info) => {
   }
 });
 
-const { Settings, DEFAULTS } = require("./settings");
+const { Settings, DEFAULTS, SECRET_KEYS } = require("./settings");
 const { buildWindowMenu } = require("./window-menu");
 const { buildTrayMenu } = require("./tray-menu");
 const { createIdleCache } = require("./idle-cache");
@@ -1130,6 +1180,46 @@ let cursorTimer = null;
 let watcherTimer = null;
 
 let S = null; // Settings 实例
+
+// 密钥（apiKey / seeKey）在盘上不落明文：交给 Electron safeStorage 加密。
+// Windows 上它走 DPAPI，密文绑当前用户 —— 换个账户或拷到别的机器都解不开。
+// safeStorage 只能在 ready 之后调，所以 Settings 先在构造时把密文原样留住（secureState=locked），
+// 这里挂上解密器再重载一次：能解就恢复明文，盘上还是明文就顺手迁成密文。
+function attachSecretStorage() {
+  try {
+    const { safeStorage } = require("electron");
+    const usable = !!(safeStorage && typeof safeStorage.isEncryptionAvailable === "function"
+      && safeStorage.isEncryptionAvailable()
+      && typeof safeStorage.encryptString === "function"
+      && typeof safeStorage.decryptString === "function");
+    if (!usable) {
+      S.attachCrypto(null);
+      // 说不加密就说不加密，不假装。常见于没有密钥环的 Linux / 精简版 Windows。
+      logErr("[main] 系统密钥库不可用，API Key 仍以明文保存在 settings.json（可在设置里看到提示）");
+      return S.secureState;
+    }
+    const state = S.attachCrypto({
+      encrypt: (plain) => "safe1:" + safeStorage.encryptString(String(plain)).toString("base64"),
+      decrypt: (blob) => {
+        const b = String(blob || "");
+        if (b.indexOf("safe1:") !== 0) return null;
+        return safeStorage.decryptString(Buffer.from(b.slice(6), "base64"));
+      },
+    });
+    // 状态只描述「盘上有什么」：一个密钥都没存过时也是 plaintext，
+    // 不补一句说明的话，看日志的人会以为「我的 key 正在明文躺盘上」。
+    const hasSecret = SECRET_KEYS.some((k) => !!S.get(k))
+      || !!(S._keepBlob && Object.keys(S._keepBlob).length);
+    log("[main] 密钥存储：" + state
+      + (hasSecret ? "" : "（尚未保存密钥）")
+      + (S.secureError ? "（" + S.secureError + "）" : ""));
+    return state;
+  } catch (e) {
+    logErr("[main] 装配密钥加密失败：" + e);
+    try { S.attachCrypto(null); } catch (x) { }
+    return "plaintext";
+  }
+}
 // 模型适配器：管模型包仓库 + 规则系统。渲染端和适配器窗口都通过本地服务访问它。
 let ADAPTER = null;
 
@@ -3577,7 +3667,9 @@ ipcMain.handle("api:test", async (_e, cfg) => {
   // 故意走主进程而不是渲染进程：主进程没有同源限制，测外网接口不会被 CORS 拦。
   const started = Date.now();
   const base = String((cfg && cfg.apiBase) || "").replace(/\/+$/, "");
-  const key = String((cfg && cfg.apiKey) || "");
+  // 设置页现在拿到的是掩码，没改过就不会带 key 上来：
+  // undefined = 「没改，用存着的」，"" = 「用户清空了」。两者不能混。
+  const key = cfg && cfg.apiKey !== undefined ? String(cfg.apiKey || "") : String(S.get("apiKey") || "");
   const model = String((cfg && cfg.apiModel) || "").trim();
   if (!/^https?:\/\//i.test(base)) {
     return { ok: false, ms: 0, error: "接口地址要以 http:// 或 https:// 开头" };
@@ -3700,7 +3792,11 @@ ipcMain.on("dsh-state", (_e, payload) => {
   if (win && !win.isDestroyed()) win.webContents.send("dsh-state", payload);
 });
 
-ipcMain.handle("settings:get", () => ({ ...S.get(), version: app.getVersion() }));
+ipcMain.handle("settings:get", () => ({
+  // 这个通道只给设置页用（主窗口要明文走 settings-changed），所以这里就发掩码。
+  ...forSettingsWindow(S.get()),
+  version: app.getVersion(),
+}));
 
 // 快捷键当前的注册情况：设置里要能看出「填了但被别的软件占了」。
 ipcMain.handle("hotkey:status", () => {
@@ -3857,6 +3953,14 @@ ipcMain.handle("window:menu", (e) => {
 });
 
 ipcMain.handle("settings:patch", async (_e, patch) => {
+  // 设置页拿到的是掩码，正常情况下它不会把掩码推回来（改过才提交）。
+  // 但旧页面、手写的调用、或者是用户把输入框整个删空后又点回来，都可能带着「••••」回来；
+  // 那种值一旦存进盘里，密钥就被覆盖成一串星号，而且再也换不回来。
+  if (patch && typeof patch === "object") {
+    for (const k of SECRET_KEYS) {
+      if (looksMasked(patch[k])) delete patch[k];
+    }
+  }
   const next = S.patch(patch);
   // 写盘失败时 S.lastSaveError 才有值：主进程没有控制台，必须落进 run.log，否则用户
   // 改完设置以为生效了、重启才发现全没——而且查不到任何原因。
@@ -5071,7 +5175,18 @@ function checkLastCrash() {
 
 ipcMain.handle("diag:open", async (_e, p) => {
   try {
-    const err = await shell.openPath(String(p || ""));
+    const raw = String(p || "");
+    if (!raw) return { ok: false, error: "没有要打开的目录" };
+    // 渲染层只应该传主进程自己给出的诊断目录。这里再夹一次：解析成真实路径后必须
+    // 仍落在 userData 里 —— 否则这条 IPC 等于把「让主进程打开任意路径（.exe/.bat
+    // 会被执行）」交到了页面上，日后任何一处 XSS 都能接成提权跳板。
+    const target = path.resolve(raw);
+    const base = path.resolve(app.getPath("userData"));
+    const rel = path.relative(base, target);
+    if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+      return { ok: false, error: "只允许打开诊断目录" };
+    }
+    const err = await shell.openPath(target);
     return { ok: !err, error: err || "" };
   } catch (e) {
     return { ok: false, error: String((e && e.message) || e) };
@@ -5638,6 +5753,7 @@ app.whenReady().then(async () => {
   log("[boot] whenReady 入口");
   bootMark("ready");
   S = new Settings(app.getPath("userData"));
+  attachSecretStorage();
   log("[boot] Settings 就绪");
   // 锁屏 / 休眠时停渲染。powerMonitor 只能在 ready 之后用，而且人走开时
   // Cubism 的每帧开销一分不少，只有真的不画才省得下来。

@@ -61,6 +61,35 @@ function startServer(opts) {
     }
   }
 
+  // ── 来源校验 ──────────────────────────────────────────────
+  // 只绑 127.0.0.1 挡不住浏览器：任意网页都能把「简单请求」（text/plain、不触发
+  // 预检）发到本机端口去改设置、切模型、删模型包；DNS rebinding 还能把 evil.com
+  // 解析到 127.0.0.1，之后同源读回来。所以每个请求都要回答三个问题：
+  // Host 是不是回环、Origin（有的话）是不是本站、Sec-Fetch-Site 有没有自称跨站。
+  const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+  function sameOriginOk(req, port) {
+    const host = String(req.headers.host || "").trim();
+    if (host) {
+      const m = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(host);
+      if (!m) return false;
+      if (!LOOPBACK.has(m[1].toLowerCase())) return false;
+      if (m[2] && port && Number(m[2]) !== port) return false;
+    }
+    const origin = req.headers.origin;
+    if (origin != null) {
+      // 用 URL 解析判同源，不拼字符串比对：手写白名单容易漏掉「大小写 / 默认端口 /
+      // IPv6 方括号」这些写法差异，而解析器本来就按规范归一。
+      // 另外别在源码里写字面量地址，出站审计会把注释里的它们当成真实域名。
+      let o;
+      try { o = new URL(String(origin).trim()); } catch (e) { return false; }
+      if (o.protocol !== "http:") return false;
+      if (!LOOPBACK.has(o.hostname.toLowerCase())) return false;
+      if (port && Number(o.port || 80) !== port) return false;
+    }
+    if (String(req.headers["sec-fetch-site"] || "").toLowerCase() === "cross-site") return false;
+    return true;
+  }
+
   const srv = http.createServer((req, res) => {
     try {
       // 所有响应统一带的安全头。挂件跑在本地，真正的威胁不是远端攻击者，
@@ -84,6 +113,20 @@ function startServer(opts) {
         return;
       }
       const q = new URLSearchParams((req.url || "").split("?")[1] || "");
+
+      // 来源不对就当场 403。只记一行，不写堆栈 —— 这个口子本机任何页面都能刷，
+      // 写堆栈会让 run.log 被刷到轮转。
+      const boundPort = (srv.address() && srv.address().port) || 0;
+      if (!sameOriginOk(req, boundPort)) {
+        try {
+          logErr("[server] 拒绝可疑来源 origin=" + String(req.headers.origin || "-")
+            + " host=" + String(req.headers.host || "-")
+            + " " + req.method + " " + url);
+        } catch (e) { }
+        res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
+        res.end("forbidden");
+        return;
+      }
 
       // ── 模型包：适配器接口 + 模型文件本体 ──────────
       // 挂在所有路由最前面。它自己判前缀，不是 /api/packs* 或 /packs/* 就返回 false，
@@ -467,7 +510,11 @@ function startServer(opts) {
             });
             if (!r.ok) {
               const t = await r.text();
-              res.writeHead(Number(e && e.statusCode) || 500, { "content-type": "application/json; charset=utf-8" });
+              // 这里没有 catch 的 `e`（外层 catch 在下面）。原来写 `e && e.statusCode`
+              // 求值即抛 ReferenceError，被外层接住后客户端只看到 "e is not defined"，
+              // RVC 真正说了什么反而丢了。
+              const code = Number(r.status);
+              res.writeHead(code >= 400 && code <= 599 ? code : 500, { "content-type": "application/json; charset=utf-8" });
               res.end(JSON.stringify({ ok: false, error: t.slice(0, 500) }));
               return;
             }

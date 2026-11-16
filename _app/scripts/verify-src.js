@@ -712,7 +712,9 @@ if (!fs.existsSync(changelog)) {
   else bad("没测未知键");
   if (/activePack 带 \.\.\//.test(tt)) ok("测了模型包 id 的路径穿越");
   else bad("没测 activePack 穿越");
-  if (/module\.exports = \{ Settings, DEFAULTS, sanitize, migrate \}/.test(setSrc)) ok("settings 导出了 sanitize/migrate");
+  // 只要 sanitize / migrate 被导出来就行；导出表以后会长（比如 SECRET_KEYS），
+  // 用字面量全等会把这些无害的增长判成失败。
+  if (/module\.exports = \{[^}]*\bsanitize\b[^}]*\bmigrate\b[^}]*\}/.test(setSrc)) ok("settings 导出了 sanitize/migrate");
   else bad("settings 没导出 sanitize/migrate，测试没法直接喂边界值");
   if (/if \(key === "viewBox"\) continue;/.test(setSrc)) ok("通用循环会跳过 viewBox（否则夹取被覆盖）");
   else bad("通用循环没跳过 viewBox，手改 h:9 就能让取景框缩成一点");

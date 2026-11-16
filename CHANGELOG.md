@@ -1,5 +1,60 @@
 # 更新日志
 
+## 1.6.5 — 2026-11-16
+
+这一版是**安全与发行加固**，不动交互。另外把 `package.json` 的版本号从此前一直没跟上的
+`1.3.2` 补到 `1.6.5`——1.4 / 1.5 / 1.6 三串只改了代码没改版本号，而更新检查是拿
+`app.getVersion()` 跟 Releases 的标签比的，一直停在 1.3.2 会让每个用户都被提示「有新版本」。
+
+### 本机服务不再谁都能喊
+
+本地 HTTP 服务（127.0.0.1:7801 起）此前只靠「绑在回环地址」当安全边界：任意网页都能
+往它发一个不带预检的简单请求（`POST /usage/clear` 实测从 200 变 403 之前是 200，计数真的被清），
+伪造 `Host` 也能通（DNS rebinding 后能读回本机任意路径的存在性）。现在每个请求先过
+`sameOriginOk(req, port)`：`Host` 必须是回环地址且端口等于实际监听端口，`Origin` 若存在必须是
+同端口的回环来源，`Sec-Fetch-Site: cross-site` 直接拒；不通过回 403 并在 `run.log` 记
+`[server] 拒绝可疑来源`。本机脚本（无 Origin）照旧放行。
+
+### 出错时说清哪一步坏了
+
+- **RVC**：`/engine/rvc` 的失败分支里引用了作用域外的 `e`，求值即抛 `ReferenceError`，
+  客户端拿到的是 `500 e is not defined`，引擎返回的真实原因（例如「模型文件损坏」）全丢了。
+  现在透传上游状态码与正文。
+- **子进程**：rvc / 随身桥接 / 三个安装器共 5 处 `spawn` 没挂 `error` 监听，
+  `EACCES`、被安全软件拦下时状态机以为进程起来了，错误只落到 `uncaughtException`。
+  现在各自落 `rvcLastError` / `miniLastError` / 安装日志。
+- **诊断目录**：`diag:open` 原先把渲染层传来的路径直接交给 `shell.openPath`（对 `.exe` 就是执行），
+  现在只允许打开 `userData` 下的诊断目录。
+
+### 密钥不再明文躺在盘上
+
+`apiKey` / `seeKey` 改用 Electron `safeStorage` 加密（Windows 上走 DPAPI，密文绑当前账户），
+写在 `settings.json` 顶层 `secure` 区，形如 `safe1:<base64>`；首次启动一次性把旧明文迁成密文。
+内存里仍是明文，所有调用方零改动。解不开（换过 Windows 账户、系统密钥库被重置）或没装密钥库时
+**密文原样保留**，不销毁、不假装成功，设置页会说清并让你重填。设置页只回填
+`前三 + •••• + 后四位` 的掩码，没改动就不提交，`测试连通` 也只在真改了才带新密钥。
+
+真机验证：`scripts/test-secrets.js` 11 条断言全过；在 Electron 35.7.5 主进程用真 DPAPI 跑
+15 项（密文改一字节即抛错、无加密器时密文存活、恢复后能解开）全过。边界照实说：
+同账户下的恶意进程、以及主窗口渲染层（`voice.js` 在渲染层直接发请求）仍拿得到明文。
+
+### 发行：签名位置就位，差一张证书
+
+- `build.win.signAndEditExecutable: true`（让 rcedit 写图标与版本资源）、
+  `signingHashAlgorithms: ["sha256"]`，`forceCodeSigning` 仍为 `false`——没证书也能出包。
+- 新增 `npm run sign:check`（`scripts/sign-check.js`）：读 `dist` 里的 exe，打印版本资源与
+  Authenticode 状态，`--strict` 时未签名即 exit 1，成为发行前的一道门。
+- 新增 [docs/发行-签名与密钥.md](docs/发行-签名与密钥.md)：OV / EV / Azure Trusted Signing 怎么选、
+  `CSC_LINK` + `CSC_KEY_PASSWORD` 怎么接、时间戳必须开、SmartScreen 的真实预期、回滚办法。
+
+### 其他
+
+- 新增 `scripts/test-secrets.js`，`npm test` 套件 19 → 20。
+- `scripts/verify-src.js` 里「settings 导出表必须一字不差」的断言改成结构匹配（多一个
+  `SECRET_KEYS` 就红，太脆）。
+- **本版尚未打包**：Releases 里的安装包仍是 `1.3.2`，重新 `npm run build` 之后再补
+  `docs/RELEASE-1.6.5.md` 与 SHA-256。
+
 ## 1.3.2 — 2026-11-16（本次发布的安装包）
 
 这是 1.3.1 之后**第一个打出来的安装包**。1.4–1.6 那几条记录是开发过程中的里程碑，

@@ -3,7 +3,7 @@
 ![大肥鱼](docs/images/hero.png)
 
 <p>
-  <img src="https://img.shields.io/badge/version-1.3.2-6C8CFF" alt="version 1.3.2">
+  <img src="https://img.shields.io/badge/version-1.6.5-6C8CFF" alt="version 1.6.5">
   <img src="https://img.shields.io/badge/platform-Windows%2010%20%2F%2011%20x64-4C9AFF" alt="Windows 10 / 11 x64">
   <img src="https://img.shields.io/badge/%E6%9C%AC%E6%9C%BA%E5%A3%B0%E7%BA%BF-%E4%B8%8D%E9%87%87%E9%9B%86%E4%B8%8D%E4%B8%8A%E4%BC%A0-35B37E" alt="本机声线">
 </p>
@@ -70,6 +70,8 @@ Windows 桌面上的 Live2D 挂件：她跟着鼠标看、被摸头会害羞，�
 安装包在 [Releases](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/latest)：
 
 - 文件名 `dafeiyu-desk-setup-1.3.2.exe`，约 **887.5 MB**（语音模型和运行环境都在里面，装完不用再下东西）。
+- 当前 Releases 里的安装包是 **1.3.2**；仓库源码已到 **1.6.5**（本机服务来源校验、密钥加密、签名配置），
+  重新打包后会把 1.6.5 的安装包换上去。
 - 校验：`Get-FileHash .\dafeiyu-desk-setup-1.3.2.exe -Algorithm SHA256`
   → `4B409D1DF41CD6316E474A9C8C61DD7A21F7FE8D78FB6F5BAB9AE3443EF784BB`
 - **不捆绑模型**：Cubism 模型按版权单独分发。程序自带一只「大肥鱼」，换成你自己的模型走设置里的

@@ -490,16 +490,33 @@ bindHotkey(els.hotkeyMic, "hotkeyMic");
 bindHotkey(els.hotkeySummon, "hotkeySummon");
 bindHotkey(els.hotkeyMute, "hotkeyMute");
 
+// 密钥框里日常显示的是掩码（sk-••••4f2a），不是真 key —— 主进程只把掩码发过来。
+// 判断「用户改过没有」就是拿当前值和掩码比：相等 = 没动，那就不要提交；
+// 不这么做的话，一次重绘、一次点「测试」都会把整串星号当成新密钥存进去。
+function paintSecret(el, v) {
+  if (!el) return;
+  el.value = v || "";
+  el.dataset.mask = v || "";
+  el.title = v ? "已加密保存（只显示首尾）；要更换就直接输入新的密钥" : "";
+}
+
+function secretVal(el) {
+  if (!el) return undefined;
+  const mask = (el.dataset && el.dataset.mask) || "";
+  if (mask && el.value === mask) return undefined;   // 没动过
+  return el.value;                                    // 改过（含清空）
+}
+
 function paint(s) {
   cur = s;  els.scaleNum.value = Math.round(s.scale * 100);
   els.opacityNum.value = Math.round(s.opacity * 100);
   els.volumeNum.value = Math.round((s.volume === undefined ? 0.85 : s.volume) * 100);
   if (els.bridgeUrl) els.bridgeUrl.value = s.bridgeUrl || "";
   if (els.apiBase) els.apiBase.value = s.apiBase || "";
-  if (els.apiKey) els.apiKey.value = s.apiKey || "";
+  paintSecret(els.apiKey, s.apiKey || "");
   if (els.apiModel) els.apiModel.value = s.apiModel || "";
   if (els.seeBase) els.seeBase.value = s.seeBase || "";
-  if (els.seeKey) els.seeKey.value = s.seeKey || "";
+  paintSecret(els.seeKey, s.seeKey || "");
   if (els.seeModel) els.seeModel.value = s.seeModel || "";
   if (els.seeInterval) els.seeInterval.value = String(s.seeInterval == null ? 1.6 : s.seeInterval);
   if (els.seeGap) els.seeGap.value = String(s.seeGap == null ? 7 : s.seeGap);
@@ -776,9 +793,14 @@ for (const [el, key] of [
   [els.apiModel, "apiModel"],
 ]) {
   if (!el) continue;
-  el.addEventListener("change", () => push({ [key]: el.value || "" }));
+  const commit = () => {
+    const v = key === "apiKey" ? secretVal(el) : (el.value || "");
+    if (v === undefined) return;   // 密钥没改过：别把掩码写回去
+    push({ [key]: v });
+  };
+  el.addEventListener("change", commit);
   el.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); push({ [key]: el.value || "" }); }
+    if (e.key === "Enter") { e.preventDefault(); commit(); }
   });
 }
 
@@ -789,9 +811,14 @@ for (const [el, key] of [
   [els.seeModel, "seeModel"],
 ]) {
   if (!el) continue;
-  el.addEventListener("change", () => push({ [key]: el.value || "" }));
+  const commit = () => {
+    const v = key === "seeKey" ? secretVal(el) : (el.value || "");
+    if (v === undefined) return;   // 密钥没改过：别把掩码写回去
+    push({ [key]: v });
+  };
+  el.addEventListener("change", commit);
   el.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); push({ [key]: el.value || "" }); }
+    if (e.key === "Enter") { e.preventDefault(); commit(); }
   });
 }
 
@@ -830,11 +857,14 @@ if (els.seeTest) {
     if (els.seeResult) { els.seeResult.className = "result"; els.seeResult.textContent = ""; }
     try {
       // 先把输入框里的配置存下来，再抓一帧——否则刚填的模型地址没生效。
-      await push({
+      const seePatch = {
         seeBase: (els.seeBase && els.seeBase.value.trim()) || "",
-        seeKey: (els.seeKey && els.seeKey.value) || "",
         seeModel: (els.seeModel && els.seeModel.value.trim()) || "",
-      });
+      };
+      // 密钥没改过就不带：带上去的会是掩码，测出来的结果会莫名其妙地 401。
+      const sk = secretVal(els.seeKey);
+      if (sk !== undefined) seePatch.seeKey = sk;
+      await push(seePatch);
       const r = await api.seeSnapshot();
       if (r && r.ok && r.text) {
         if (els.seeResult) {
@@ -1819,11 +1849,11 @@ if (els.apiTest) {
     els.apiResult.className = "result";
     els.apiResult.textContent = "";
     try {
-      const r = await api.testApi({
-        apiBase: els.apiBase.value.trim(),
-        apiKey: els.apiKey.value,
-        apiModel: els.apiModel.value.trim(),
-      });
+      // 没改过密钥就不传，主进程用存着的那份；传掩码过去只会得到 401。
+      const ak = secretVal(els.apiKey);
+      const req = { apiBase: els.apiBase.value.trim(), apiModel: els.apiModel.value.trim() };
+      if (ak !== undefined) req.apiKey = ak;
+      const r = await api.testApi(req);
       if (r && r.ok) {
         els.apiResult.className = "result ok";
         els.apiResult.textContent = "● 通了 · " + r.ms + "ms · 模型 " + (r.model || "?") + " · 她说：" + (r.reply || "").slice(0, 40);

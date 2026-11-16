@@ -7,6 +7,18 @@
 const fs = require("fs");
 const path = require("path");
 
+// 密钥字段：这几个值不落明文。
+// 磁盘上存在文件顶层的 secure 对象里（{ apiKey: "safe1:<base64>" }），
+// 明文只活在内存 this.data 里，由主进程注入的加密器（Electron safeStorage → DPAPI）处理。
+// 为什么不走 sanitize 的字段规则：seeKey 那条 str(raw.seeKey, 400) 会把密文截断，
+// 而密文长度随明文增长，截断之后再也解不回来。
+const SECRET_KEYS = ["apiKey", "seeKey"];
+const SECRET_PREFIX = "safe1:";
+
+function isCipherBlob(v) {
+  return typeof v === "string" && v.indexOf(SECRET_PREFIX) === 0;
+}
+
 const DEFAULTS = {
   // 窗口尺寸不存这里：基准尺寸是 main.js 的 BASE_W / BASE_H 常量。
   // 用户能改的只有 scale。早先留了 width/height 两项，从来没被读过，已删掉。
@@ -349,7 +361,9 @@ function migrate(d) {
 }
 
 class Settings {
-  constructor(dir) {
+  // crypto 可选：{ encrypt(明文)->密文, decrypt(密文)->明文|null }。
+  // 不传也能跑（单元测试、以及主进程 ready 之前挂载前的那一瞬间），只是密钥保持明文。
+  constructor(dir, crypto) {
     this.dir = dir;
     this.file = path.join(dir, "settings.json");
     this.data = { ...DEFAULTS };
@@ -358,18 +372,66 @@ class Settings {
     this.lastLoadError = null;
     // 上一次 save 失败的原因（磁盘满、权限、路径被占）。null = 最近一次写盘是成功的。
     this.lastSaveError = null;
+    // 加密器。null = 还没挂上（或系统密钥库不可用）。
+    this.crypto = crypto && typeof crypto.encrypt === "function" && typeof crypto.decrypt === "function"
+      ? crypto : null;
+    // 有密文但解不开时，原样留在这里：既不敢当明文用，也不许被 save 抹掉。
+    this._keepBlob = {};
+    // "encrypted" | "plaintext" | "locked"（有密文但没加密器）| "error"（解不开）
+    this.secureState = "plaintext";
+    this.secureError = "";
     this.load();
   }
 
   load() {
     let migrated = false;
+    let needsEncrypt = false;
+    this._keepBlob = {};
+    this.secureState = "plaintext";
+    this.secureError = "";
     try {
       // 去掉 UTF-8 BOM 再解析：用记事本 / PowerShell 改过这个文件的人不少，
       // 它们会写进 EF BB BF，而 JSON.parse 见到 BOM 直接抛
       // 「Unexpected token」——于是整份设置被当成坏文件备份走、回默认值，
       // 用户看到的是「我的音色和快捷键全没了」。
       const raw = fs.readFileSync(this.file, "utf8").replace(/^\uFEFF/, "");
-      this.data = sanitize(JSON.parse(raw));
+      const obj = JSON.parse(raw);
+      const data = sanitize(obj);
+      // secure 是密钥专用区，不进 sanitize：它只认 SECRET_KEYS 这几个键，
+      // 别的字段塞进来一律不理（避免把任意字段偷渡成密文区）。
+      const secure = obj && typeof obj.secure === "object" && obj.secure ? obj.secure : {};
+      let sawBlob = false;
+      let failed = false;
+      for (const k of SECRET_KEYS) {
+        const blob = secure[k];
+        if (!isCipherBlob(blob)) continue;
+        sawBlob = true;
+        if (!this.crypto) {
+          // 还没挂加密器（主进程 ready 之前）：密文原样留住，值先置空。
+          // 置空而不是留着乱码，是为了不让别处把「safe1:...」当成真 key 发出去。
+          this._keepBlob[k] = blob;
+          data[k] = "";
+          continue;
+        }
+        const plain = this._decrypt(blob);
+        if (plain === null) {
+          // 解不开（换了 Windows 账户 / 换了机器 / 系统密钥库被重置）：
+          // 密文留着，值置空，并留下原因让设置页提示用户重填。
+          failed = true;
+          this.secureError = this.secureError || "密钥解不开（换过 Windows 账户或系统密钥库被重置），请在设置里重新填写";
+          this._keepBlob[k] = blob;
+          if (!data[k]) data[k] = "";
+        } else {
+          data[k] = plain;
+        }
+      }
+      this.secureState = failed ? "error"
+        : (!sawBlob ? "plaintext" : (this.crypto ? "encrypted" : "locked"));
+      if (!sawBlob && this.crypto) {
+        // 老配置里是明文（或者第一次运行）：有内容就趁这次迁成密文。
+        needsEncrypt = SECRET_KEYS.some((k) => typeof data[k] === "string" && data[k] !== "");
+      }
+      this.data = data;
       this.lastLoadError = null;
       migrated = migrate(this.data);
     } catch (e) {
@@ -389,17 +451,93 @@ class Settings {
       this.save();
     }
     // 迁移过就立刻落盘：不然每次启动都要重算一遍，而且界面上看到的还是旧值。
-    if (migrated) this.save();
+    if (migrated || (needsEncrypt && this.crypto)) this.save();
     return this.data;
+  }
+
+  // 主进程 ready 之后把加密器挂上来：重载一次盘（把密文解成明文），
+  // 盘上如果还是明文，就在这一步一次性迁成密文。返回最终的 secureState。
+  attachCrypto(crypto) {
+    this.crypto = crypto && typeof crypto.encrypt === "function" && typeof crypto.decrypt === "function"
+      ? crypto : null;
+    this.secureError = "";
+    if (this.crypto) this.load();
+    return this.secureState;
+  }
+
+  _encrypt(plain) {
+    if (!this.crypto) return null;
+    try {
+      const blob = this.crypto.encrypt(String(plain));
+      return isCipherBlob(blob) ? blob : null;
+    } catch (e) {
+      this.secureError = "加密失败：" + String((e && e.message) || e);
+      return null;
+    }
+  }
+
+  _decrypt(blob) {
+    if (!this.crypto) return null;
+    try {
+      const plain = this.crypto.decrypt(String(blob));
+      return typeof plain === "string" ? plain : null;
+    } catch (e) {
+      this.secureError = "解密失败：" + String((e && e.message) || e);
+      return null;
+    }
+  }
+
+  // 读盘并解出密钥；文件不存在或不是合法 JSON 时返回 null（调用方按内存走）。
+  _readDisk() {
+    try {
+      const obj = JSON.parse(fs.readFileSync(this.file, "utf8").replace(/^\uFEFF/, ""));
+      const data = sanitize(obj);
+      const secure = obj && typeof obj.secure === "object" && obj.secure ? obj.secure : {};
+      for (const k of SECRET_KEYS) {
+        const blob = secure[k];
+        if (!isCipherBlob(blob)) continue;
+        const plain = this._decrypt(blob);
+        if (plain !== null) data[k] = plain;
+        else if (!data[k]) data[k] = "";
+      }
+      return data;
+    } catch (e) {
+      return null;
+    }
   }
 
   save() {
     try {
       fs.mkdirSync(this.dir, { recursive: true });
+      const out = { ...this.data };
+      const secure = {};
+      let any = false;
+      for (const k of SECRET_KEYS) {
+        const v = typeof out[k] === "string" ? out[k] : "";
+        if (!this.crypto) {
+          // 没有加密器（系统密钥库不可用）：保持明文，不假装安全。
+          // 但解不开的那份密文要原样带回去，别因为这次保存把它弄丢。
+          if (!v && this._keepBlob[k]) { secure[k] = this._keepBlob[k]; any = true; delete out[k]; }
+          continue;
+        }
+        if (v) {
+          const blob = this._encrypt(v);
+          if (blob) { secure[k] = blob; any = true; delete out[k]; continue; }
+          // 加密失败就退回明文落盘：宁可明文，也不让用户的 key 丢掉。
+          continue;
+        }
+        if (this._keepBlob[k]) { secure[k] = this._keepBlob[k]; any = true; }
+        delete out[k];
+      }
+      if (any) out.secure = secure;
       const tmp = this.file + ".tmp";
-      fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2), "utf8");
+      fs.writeFileSync(tmp, JSON.stringify(out, null, 2), "utf8");
       fs.renameSync(tmp, this.file);
       this.lastSaveError = null;
+      if (this.secureState !== "error") {
+        if (!this.crypto) this.secureState = any ? "locked" : "plaintext";
+        else this.secureState = any ? "encrypted" : "plaintext";
+      }
       return { ok: true };
     } catch (e) {
       // 主进程没有控制台，console.error 等于没写。
@@ -420,12 +558,8 @@ class Settings {
     // 写之前先重读一次盘上的。不这么做的话，内存里那份旧值会把
     // 别处（另一个窗口、手工改文件、另一个实例）写进去的改动整份盖掉。
     // 只 merge「自己这次真正改的那几个字段」，其余以盘为准。
-    let onDisk = null;
-    try {
-      onDisk = sanitize(JSON.parse(fs.readFileSync(this.file, "utf8").replace(/^\uFEFF/, "")));
-    } catch (e) {
-      onDisk = null;   // 文件不存在或坏了，就当没有，按内存走
-    }
+    // 读盘这一步必须把 secure 里的密钥解出来，否则「盘上真有 key」会被当成空值写回去。
+    const onDisk = this._readDisk();
     this.data = sanitize({ ...(onDisk || this.data), ...partial });
     this.save();
     return this.get();
@@ -437,7 +571,6 @@ class Settings {
     return this.get();
   }
 }
-
 // sanitize / migrate 也导出来：它们是纯函数，settings 的每一条校验规则都靠它们兜底，
 // 值得被 scripts/test-settings-schema.js 直接喂边界值验一遍，而不是造一堆坏配置文件去启动。
-module.exports = { Settings, DEFAULTS, sanitize, migrate };
+module.exports = { Settings, DEFAULTS, sanitize, migrate, SECRET_KEYS };

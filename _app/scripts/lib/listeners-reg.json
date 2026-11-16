@@ -1,5 +1,5 @@
 {
-  "note": "订阅登记表：新增一处订阅就红，逼着回答「它为什么不会堆」。except 里是缩进深但确认安全的位置。",
+  "note": "订阅登记表：新增一处订阅就红，逼着回答「它为什么不会堆」。except 里是缩进深但确认安全的位置。 2026-11-16：main.js 新增 5 处 spawn 的 error 监听（rvcProc / miniProc / rvcSetupProc / xttsSetupProc / feiyuSetupProc），每个进程对象在启动时创建一次、只挂一次，进程退出后对象随之丢弃，不跨次累积；挂它是为了让 ENOENT/EACCES 有地方落地，而不是升级成 uncaughtException。",
   "counts": {
     "src/adapter.js": {
       "internalModel.on(\"beforeModelUpdate\")": 2
@@ -9,9 +9,14 @@
       "stdout.on(\"data\")": 5,
       "stderr.on(\"data\")": 5,
       "rvcProc.on(\"exit\")": 1,
+      "rvcProc.on(\"error\")": 1,
+      "miniProc.on(\"error\")": 1,
       "miniProc.on(\"close\")": 1,
+      "rvcSetupProc.on(\"error\")": 1,
       "rvcSetupProc.on(\"exit\")": 1,
+      "xttsSetupProc.on(\"error\")": 1,
       "xttsSetupProc.on(\"exit\")": 1,
+      "feiyuSetupProc.on(\"error\")": 1,
       "feiyuSetupProc.on(\"exit\")": 1,
       "ipcMain.on(\"renderer:error\")": 1,
       "wc.on(\"did-finish-load\")": 1,
@@ -142,11 +147,11 @@
       "why": "同上，第二条回调（表达式预览）。两条分开是因为它们各自可以被单独关掉。"
     },
     {
-      "where": "src/server.js:760",
+      "where": "src/server.js:807",
       "why": "每次 listen() 都新建一个 server 对象，once(\"error\") 挂在那个新对象上。"
     },
     {
-      "where": "src/server.js:761",
+      "where": "src/server.js:808",
       "why": "同上，once(\"listening\") 也是一次性。"
     }
   ]
