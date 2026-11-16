@@ -12,7 +12,7 @@ Windows 桌面上的 Live2D 挂件：她跟着鼠标看、被摸头会害羞，�
 也能直接和你正在用的 DSH 会话对话。安装包里的进程名是 `dafeiyu-desk`。
 
 **[下载安装包](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/latest)** ·
-[更新日志](CHANGELOG.md) · [项目总览](PROJECT.md) · [验收清单](验收清单.md) · [1.6.5 发版说明](docs/RELEASE-1.6.5.md)
+[更新日志](CHANGELOG.md) · [项目总览](PROJECT.md) · [验收清单](验收清单.md) · [1.6.6 发版说明](docs/RELEASE-1.6.6.md)
 
 ---
 
@@ -69,11 +69,11 @@ Windows 桌面上的 Live2D 挂件：她跟着鼠标看、被摸头会害羞，�
 
 安装包在 [Releases](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/latest)：
 
-- 文件名 `大肥鱼-1.6.5-安装包.exe`（自动更新走同名硬链接 `dafeiyu-desk-setup-1.6.5.exe`），
+- 文件名 `大肥鱼-1.6.6-安装包.exe`（自动更新走同名硬链接 `dafeiyu-desk-setup-1.6.6.exe`），
   约 **887.5 MB**（语音模型和运行环境都在里面，装完不用再下东西）。
-- 校验：`Get-FileHash .\大肥鱼-1.6.5-安装包.exe -Algorithm SHA256`
-  → `E7C1771B11EE3583C4FE1B94F6E29372E7DA74597DD3FFE6420F67B2F671D597`
-- 1.6.6 只改了代码（看屏幕的用量收敛），没有重新打包：安装包还是上面这个 1.6.5，想看屏幕的修复要等下一次打包的版本。
+- 校验：`Get-FileHash .\大肥鱼-1.6.6-安装包.exe -Algorithm SHA256`
+  → `53CB11AE4F96DBC6C3BC3CC3066EE84FA43F7BAC669F2C8C6B3DD861BBFA2856`
+- 1.6.6 只动了「看屏幕」这一条链路：会话沿用、用量收敛、不再白预热、不再卡 75 秒。细节见[发版说明](docs/RELEASE-1.6.6.md)。
 - **不捆绑模型**：Cubism 模型按版权单独分发。程序自带一只「大肥鱼」，换成你自己的模型走设置里的
   [模型适配器](docs/模型适配器-使用说明.md)（导入 zip，取景、动作、表情、点击分区都在里面调）。
 - 绿色使用：安装器是 NSIS，卸载会清干净；配置和聊天记录都在用户数据目录，
