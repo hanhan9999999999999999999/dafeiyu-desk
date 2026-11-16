@@ -12,7 +12,7 @@ Windows 桌面上的 Live2D 挂件：她跟着鼠标看、被摸头会害羞，�
 也能直接和你正在用的 DSH 会话对话。安装包里的进程名是 `dafeiyu-desk`。
 
 **[下载安装包](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/latest)** ·
-[更新日志](CHANGELOG.md) · [项目总览](PROJECT.md) · [验收清单](验收清单.md) · [1.3.2 发版说明](docs/RELEASE-1.3.2.md)
+[更新日志](CHANGELOG.md) · [项目总览](PROJECT.md) · [验收清单](验收清单.md) · [1.6.5 发版说明](docs/RELEASE-1.6.5.md)
 
 ---
 
@@ -69,11 +69,10 @@ Windows 桌面上的 Live2D 挂件：她跟着鼠标看、被摸头会害羞，�
 
 安装包在 [Releases](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/latest)：
 
-- 文件名 `dafeiyu-desk-setup-1.3.2.exe`，约 **887.5 MB**（语音模型和运行环境都在里面，装完不用再下东西）。
-- 当前 Releases 里的安装包是 **1.3.2**；仓库源码已到 **1.6.5**（本机服务来源校验、密钥加密、签名配置），
-  重新打包后会把 1.6.5 的安装包换上去。
-- 校验：`Get-FileHash .\dafeiyu-desk-setup-1.3.2.exe -Algorithm SHA256`
-  → `4B409D1DF41CD6316E474A9C8C61DD7A21F7FE8D78FB6F5BAB9AE3443EF784BB`
+- 文件名 `大肥鱼-1.6.5-安装包.exe`（自动更新走同名硬链接 `dafeiyu-desk-setup-1.6.5.exe`），
+  约 **887.5 MB**（语音模型和运行环境都在里面，装完不用再下东西）。
+- 校验：`Get-FileHash .\大肥鱼-1.6.5-安装包.exe -Algorithm SHA256`
+  → `E7C1771B11EE3583C4FE1B94F6E29372E7DA74597DD3FFE6420F67B2F671D597`
 - **不捆绑模型**：Cubism 模型按版权单独分发。程序自带一只「大肥鱼」，换成你自己的模型走设置里的
   [模型适配器](docs/模型适配器-使用说明.md)（导入 zip，取景、动作、表情、点击分区都在里面调）。
 - 绿色使用：安装器是 NSIS，卸载会清干净；配置和聊天记录都在用户数据目录，
