@@ -452,7 +452,16 @@ async function bridgeEnsure(opt) {
       out.ok = true;
       out.external = true;
       out.base = bridgeBase();
-      out.note = "外部桥接在跑：" + out.base;
+      // 「external」原来的意思是「不是我们 spawn 的」，但探到应答时它被当成
+      // 「你填的地址通了」用，设置页照这句话写成「你填的桥接是通的」——
+      // 结果原地址 8811 明明没应答，页面上却说通了。这里把两件事分开记：
+      //   answered = 当前地址真的有桥在答话
+      //   mine     = 答话的就是本程序拉起的自带桥
+      out.answered = true;
+      const ms = miniStatus();
+      out.mine = !!(ms && ms.running && out.base === miniUrl());
+      out.external = !out.mine;
+      out.note = (out.mine ? "自带桥接在跑：" : "外部桥接在跑：") + out.base;
       return out;
     }
   } catch (e) { }
@@ -485,9 +494,15 @@ async function bridgeEnsure(opt) {
   }
   const ok = !!(j && (j.token || readBridgeToken()));
   out.ok = ok;
+  if (ok) {
+    // 走的是自带桥接：地址是我们指过去的，别再说「你填的那个通了」。
+    out.answered = true;
+    out.mine = true;
+    out.external = false;
+  }
   out.note = ok
-    ? (out.switched ? "外部桥没在跑，已自动改用自带桥接：" + out.base : "用自带桥接：" + out.base)
-    : "自带桥接重起后仍然没应答：" + out.base + (miniLastError ? "（" + miniLastError + "）" : "");
+    ? (out.switched ? "你填的地址没应答，已自动改用随身桥接：" + out.base : "用随身桥接：" + out.base)
+    : "随身桥接重起后仍然没应答：" + out.base + (miniLastError ? "（" + miniLastError + "）" : "");
   return out;
 }
 
@@ -1259,6 +1274,8 @@ async function setGameMode(on) {
         win.show();
         win.focus();
       } catch (e) { }
+      // 退出游戏模式 = 窗口刚从「藏起来」回来，输入命中区必须重立一次。
+      rearmInput("退出游戏模式");
     }
     // 看屏幕按原来的开关恢复：他本来开着才恢复，本来关着就别自作主张打开
     try { if (gamePrev && gamePrev.seeRunning) openSeeWatch(); } catch (e) { }
@@ -1275,6 +1292,28 @@ async function setGameMode(on) {
   } catch (e) { }
   log("[game] " + (want ? "进入" : "退出") + "游戏模式");
   return { ok: true, ...gameStatus() };
+}
+
+// 窗口被藏过再拿回来（游戏模式、托盘隐藏、热键唤出）之后，统一把「能不能接鼠标」重立一次。
+// 不这么做的时候，hide/show 之后 Windows 那边偶尔还认为整窗是穿透的：
+// 画面明明在、hover 有反应（forward 透传），但按下去什么都不会发生 —— 拖不动、按钮点不着。
+// 这里做四件事，每一件都对应一种「看得见摸不着」：
+//   ① 把穿透状态按设置重设一遍，并把缓存清掉，让光标采样重新决定；
+//   ② 总在最前重新声明一次（hide/show 会掉层级，被别的置顶窗口压住等于不在）；
+//   ③ 保持「不抢焦点」（要打字时 summonDock 会临时打开，那时不需要这里管）；
+//   ④ 告诉渲染层「我刚被拿回来」，让它把可能卡住的拖拽状态清掉。
+function rearmInput(why) {
+  if (!win || win.isDestroyed()) return;
+  const st = S && S.get ? S.get() : {};
+  cursorIgnoring = null;
+  try { win.setIgnoreMouseEvents(!!st.clickThrough, { forward: true }); } catch (e) { }
+  try { win.__ignoreMouse = !!st.clickThrough; } catch (e) { }
+  try { if (st.alwaysOnTop) win.setAlwaysOnTop(true, "screen-saver"); } catch (e) { }
+  try { win.moveTop(); } catch (e) { }
+  try {
+    if (win.webContents && !win.webContents.isDestroyed()) win.webContents.send("window:shown", String(why || ""));
+  } catch (e) { }
+  log("[main] 窗口拿回来了（" + (why || "show") + "），鼠标与置顶已重立");
 }
 
 
@@ -1581,7 +1620,11 @@ function createWindow() {  const s = S.get();
   win.on("restore", () => setPauseReason("minimize", false));
   // 托盘「隐藏」只是把窗口藏起来，不是最小化；藏起来时也没必要继续画。
   win.on("hide", () => setPauseReason("hidden", true));
-  win.on("show", () => setPauseReason("hidden", false));
+  win.on("show", () => {
+    setPauseReason("hidden", false);
+    // 藏过再显示：命中区会留在旧状态，必须重立（见 rearmInput 的注释）。
+    rearmInput("窗口重新显示");
+  });
 
   win.on("closed", () => { win = null; });
   win.on("moved", () => {
@@ -1644,12 +1687,15 @@ function createWindow() {  const s = S.get();
 }
 
 // 全局鼠标位置：30fps 采样足够跟手，CPU 几乎为零
+// 「当前是不是整窗穿透」记在模块作用域：窗口被藏过再拿回来时要把它清掉重立，
+// 否则 Windows 那边还停在旧的命中区状态 —— 人就「看得见、拖不动、按钮点不着」。
+let cursorIgnoring = null;
 function startCursorFeed() {
   if (cursorTimer) clearInterval(cursorTimer);
   // 鼠标穿透开着的时候，整窗都不收鼠标事件——连输入框和语音键也点不到，
   // 那就等于"开了穿透就没法打字"。所以这里按位置动态松一下：
   // 指针进了底部输入条那一条，就临时恢复接收事件。
-  let ignoring = null;
+  let ignoring = cursorIgnoring;
   let cursorSent = 0;   // 只给自测读：真的发出去了多少帧
   cursorTimer = setInterval(() => {
     if (win === null || win.isDestroyed()) return;
@@ -1666,10 +1712,12 @@ function startCursorFeed() {
       const shouldIgnore = !overDock;
       if (shouldIgnore !== ignoring) {
         ignoring = shouldIgnore;
+        cursorIgnoring = ignoring;
         try { win.setIgnoreMouseEvents(shouldIgnore, { forward: true }); } catch (e) { }
       }
     } else if (ignoring !== false) {
       ignoring = false;
+      cursorIgnoring = false;
     }
     win.webContents.send("cursor", { x: p.x, y: p.y, wx, wy, w: ww, h: wh });
     cursorSent += 1;
@@ -3162,6 +3210,8 @@ function resurfaceMainWindow(why) {
   if (!win.isVisible()) win.show();
   win.focus();
   try { win.moveTop(); } catch (e) { }
+  // 从托盘点回来同样要重立输入：否则「叫出来了，但拖不动」。
+  rearmInput("托盘 / 热键显示");
   scheduleReflow();
   return true;
 }

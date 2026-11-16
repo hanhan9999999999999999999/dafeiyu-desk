@@ -59,6 +59,14 @@ contextBridge.exposeInMainWorld("deskfish", {
     ipcRenderer.on("app:pause-render", (_e, on) => fn(!!on));
   },
 
+  // 窗口被藏过又拿回来（游戏模式、托盘隐藏、热键唤出）：主进程已经重立了输入区，
+  // 渲染侧要把可能卡住的拖拽状态清掉，否则「看得见、拖不动」。
+  onWindowShown: (fn) => {
+    const h = (_e, why) => { try { fn(String(why || "")); } catch (e) { } };
+    ipcRenderer.on("window:shown", h);
+    return () => ipcRenderer.removeListener("window:shown", h);
+  },
+
   // 托盘 / 右键菜单里的快捷互动（喂一口、摸摸头），主窗负责执行
   onPetQuick: (fn) => {
     ipcRenderer.on("pet:quick", (_e, p) => fn(p));

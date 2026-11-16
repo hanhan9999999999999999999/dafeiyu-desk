@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/Windows-10%20%2F%2011-0078D4?logo=windows&logoColor=white" alt="Windows 10 / 11">
   <img src="https://img.shields.io/badge/Electron-35.7.5-47848F?logo=electron&logoColor=white" alt="Electron 35.7.5">
   <img src="https://img.shields.io/badge/Live2D-Cubism-FF6B9D" alt="Live2D">
-  <img src="https://img.shields.io/badge/version-1.6.1-6C8CFF" alt="version 1.6.1">
+  <img src="https://img.shields.io/badge/version-1.6.2-6C8CFF" alt="version 1.6.2">
   <img src="https://img.shields.io/badge/license-see%20LICENSE-lightgrey" alt="license">
 </p>
 

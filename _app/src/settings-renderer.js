@@ -2152,29 +2152,33 @@ function paintBridgeFix(r) {
     return;
   }
   const where = r.base ? ' · <b>' + esc(r.base) + "</b>" : "";
-  if (r.ok && r.external) {
+  if (r.ok && r.mine === false) {
+    // 真的探到了「你现在填的这个地址」在答话（外部 phone-bridge 之类）。
     els.bridgeFixHint.className = "notice ok";
-    els.bridgeFixHint.innerHTML = "✓ 你填的桥接是通的" + where + (r.note ? '<br><span class="meta">' + esc(r.note) + "</span>" : "");
-  } else if (r.ok && r.mini) {
+    els.bridgeFixHint.innerHTML = "✓ 这个地址是通的" + where + (r.note ? '<br><span class="meta">' + esc(r.note) + "</span>" : "");
+  } else if (r.ok) {
     els.bridgeFixHint.className = "notice ok";
     els.bridgeFixHint.innerHTML =
       "✓ 随身桥接已经在跑" + where +
-      "<br><span class=\"meta\">" + (r.switched ? "地址栏已经指过来了。" : "") +
+      "<br><span class=\"meta\">" +
+      (r.switched ? "你填的地址没应答，地址栏已经指过来了。" : "") +
       "这台机器没装 phone-bridge 也能用 —— 它直接连本机 DSH。</span>";
   } else {
     els.bridgeFixHint.className = "notice warn";
     els.bridgeFixHint.innerHTML =
       "没连上" + where + "<br><span class=\"meta\">" +
-      esc(r.note || r.error || "本机 DSH 可能没在运行。DSH 起来之后它会每 90 秒自己再试一次，不用你管。") +
+      esc(r.note || r.error || "本机 DSH 可能没在运行。DSH 起来之后它会每 45 秒自己再试一次，不用你管。") +
       "</span>";
   }
-  // 主进程可能已经把地址改了，这里同步一下输入框与语音层
-  if (r.base) {
-    const cur = els.bridgeUrl ? String(els.bridgeUrl.value || "").trim() : "";
-    if (r.switched && els.bridgeUrl) els.bridgeUrl.value = r.base;
-    else if (!cur && els.bridgeUrl) els.bridgeUrl.value = r.base;
-    if (window.FishVoice && window.FishVoice.setBridgeUrl) window.FishVoice.setBridgeUrl(r.base);
+  // 主进程可能已经把地址改了，这里同步输入框与语音层。
+  // 以前只在 r.switched 或输入框为空时才回填，于是「点完修复、地址还是旧端口」，
+  // 下一次 change 事件又把旧地址写回磁盘 —— 两边拉锯，看着就像修不好。
+  if (r.base && els.bridgeUrl) {
+    const cur = String(els.bridgeUrl.value || "").trim().replace(/\/+$/, "");
+    const want = String(r.base).replace(/\/+$/, "");
+    if (want && want !== cur && document.activeElement !== els.bridgeUrl) els.bridgeUrl.value = r.base;
   }
+  if (r.base && window.FishVoice && window.FishVoice.setBridgeUrl) window.FishVoice.setBridgeUrl(r.base);
 }
 
 async function runBridgeFix(auto) {

@@ -1731,8 +1731,14 @@ t42("订阅审计挂在 npm run verify 上",
   t44("探针只比对新增的话，不在整段历史里搜关键词", PR44.indexOf("saidCount") >= 0);
 
   t44("renderer 记了 dshLink / dshFail", RD44.indexOf("let dshLink =") >= 0 && RD44.indexOf("let dshFail =") >= 0);
-  t44("连续两次失败才算断（一次抖动不该让她变脸）", RD44.indexOf("if (dshFail < 2 || dshLink === \"down\") return;") >= 0);
-  t44("断线时她说了一句「连不上 DSH」", RD44.indexOf("连不上 DSH") >= 0);
+  t44("连续两次失败才算断（一次抖动不该让她变脸）", RD44.indexOf("if (dshFail < 2 || dshLink === \"down\") {") >= 0);
+  // 1.6.2：断线时先自愈一次，说清「哪个地址不通、改走了随身桥接」，
+  // 不再用一句笼统的「连不上 DSH」把用户丢在那儿。
+  t44(
+    "断线时说的是「哪个地址不通」，而不是笼统的「连不上」",
+    RD44.indexOf("原来那个地址（") >= 0 && RD44.indexOf("随身桥接也没起来") >= 0
+  );
+  t44("报过断之后仍然定期再自愈（不是说完就不管）", RD44.indexOf("dshFail % 3 === 0") >= 0);
   t44("回来时说了一句「连上了」", RD44.indexOf("连上了，我在。") >= 0);
   t44("失败分支不再吞掉错误（catch 里要调 setLink(false)）", RD44.indexOf(".catch(() => { setLink(false); })") >= 0);
 

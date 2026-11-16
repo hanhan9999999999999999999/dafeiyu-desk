@@ -53,6 +53,34 @@ const voice = read("src/voice.js");
 has(voice, "window.deskfish.bridgeEnsure({})", "连不上时先问主进程要一个可用地址再试");
 has(voice, "没应答），设置里点", "报错带上端口，主人一眼看出是哪一步错");
 
+console.log("说的是人话，不是「连不上 DSH」");
+const rnd = read("src/renderer.js");
+has(rnd, "原来那个地址（", "原地址不通时先说清是哪个端口");
+has(rnd, "我改走随身桥接了", "能改走随身桥接就如实说改走了");
+has(rnd, "随身桥接也没起来", "真没救了才说没救，并给出下一步");
+has(rnd, "const healBridge = () =>", "renderer 也有自愈入口");
+has(rnd, "dshFail % 3 === 0", "已经报过「断了」之后仍然定期再试");
+has(voice, "async function healBridgeBase(", "语音层有同一个自愈入口");
+has(voice, "return postJson(path, body, _retried, true);", "换到可用地址后把这句话重发一遍");
+has(main, "out.answered = true;", "bridgeEnsure 分开记「有没有桥答话」");
+has(main, "out.mine = true;", "bridgeEnsure 分开记「答话的是不是自带桥」");
+has(renderer, "这个地址是通的", "只有真的探到你填的地址才这么说");
+has(renderer, "你填的地址没应答，地址栏已经指过来了。", "指过去了就明说指过去了");
+
+console.log("藏起来又拿回来，还能拖、按钮还能点");
+has(main, "function rearmInput(", "有 rearmInput()：show 之后重立输入区");
+has(main, "win.setIgnoreMouseEvents(!!st.clickThrough, { forward: true });", "按设置重设穿透，清掉卡住的状态");
+has(main, "rearmInput(\"退出游戏模式\");", "退出游戏模式后重立");
+has(main, "rearmInput(\"窗口重新显示\");", "hide→show 后重立");
+has(main, "rearmInput(\"托盘 / 热键显示\");", "托盘/热键叫回来也重立");
+has(main, "let cursorIgnoring = null;", "穿透状态提到模块作用域，能在重立时清掉");
+has(main, 'win.webContents.send("window:shown"', "会通知渲染层「我刚被拿回来」");
+const pre = read("src/preload.js");
+has(pre, "onWindowShown:", "preload 暴露 onWindowShown");
+const rnd2 = read("src/renderer.js");
+has(rnd2, "window.deskfish.onWindowShown(", "渲染层订阅了这条通知");
+has(rnd2, "拖拽状态已复位", "收到通知就把拖拽状态复位");
+
 console.log("");
 console.log(`结果：${pass} 通过 ${fail} 失败`);
 process.exit(fail ? 1 : 0);

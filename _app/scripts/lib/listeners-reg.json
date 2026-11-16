@@ -95,6 +95,7 @@
       "ipcRenderer.on(\"dsh-activity\")": 1,
       "ipcRenderer.on(\"dsh-state\")": 1,
       "ipcRenderer.on(\"app:pause-render\")": 1,
+      "ipcRenderer.on(\"window:shown\")": 1,
       "ipcRenderer.on(\"pet:quick\")": 1,
       "ipcRenderer.on(\"settings-changed\")": 1,
       "ipcRenderer.on(\"relayout\")": 1,

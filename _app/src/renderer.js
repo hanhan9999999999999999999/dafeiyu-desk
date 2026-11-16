@@ -2833,6 +2833,23 @@ let __applyTexQuality = null;
     return false;
   };
 
+  // 窗口被藏过再拿回来（游戏模式 / 托盘隐藏 / 热键唤出）：主进程已经把输入区重立了，
+  // 这里把拖拽状态清干净。藏起来的时候 pointerup 常常永远不来，dragging 会一直挂着 true ——
+  // 再按下去就变成「按着不动」，用户看到的是「拖不动、按钮也点不着」。
+  if (window.deskfish && window.deskfish.onWindowShown) {
+    window.deskfish.onWindowShown((why) => {
+      dragging = false;
+      dragMoved = 0;
+      pressAt = 0;
+      pressComplained = false;
+      dragVX = 0;
+      dragVY = 0;
+      fling = 0;
+      try { if (window.deskfish.dragEnd) window.deskfish.dragEnd(); } catch (e) { }
+      console.log("[fish] 窗口被拿回来（" + (why || "show") + "），拖拽状态已复位");
+    });
+  }
+
   window.addEventListener("pointerdown", (ev) => {
     if (ev.button === 2) {
       ev.preventDefault();
@@ -3113,18 +3130,57 @@ let __applyTexQuality = null;
     }
     dshFail += 1;
     // 连续两次（约 16 秒）才算真断：一次网络抖动不该让她当场变脸。
-    if (dshFail < 2 || dshLink === "down") return;
+    if (dshFail < 2 || dshLink === "down") {
+      // 已经报过「断了」也别就此不管：每三拍（约 24 秒）再自愈一次，
+      // 主进程那边会把随身桥接拉起来，通了就自己回到「好了」的状态。
+      if (dshLink === "down" && dshFail % 3 === 0) healBridge();
+      return;
+    }
     dshLink = "down";
     busyByBridge = false;
     syncBusy();
     if (dshPhase === "thinking") dshPhase = "idle";
-    try {
-      say("我这边连不上 DSH 了……先去忙别的，好了我接着等。", "calm", 5200);
-    } catch (e) { }
+    // 先说人话：原地址不通 → 已经改走随身桥接 / 随身桥接也没起来。
+    healBridge().then((ok) => {
+      if (ok) return;
+      try {
+        say("原来那个地址（" + portOf(bridgeBase) + "）不通，随身桥接也没起来……我先去忙别的，好了我接着等。", "calm", 5200);
+      } catch (e) { }
+    });
   };
   const syncBridgeBase = (s) => {
     const u = s && String(s.bridgeUrl || "").trim();
     if (u) bridgeBase = u.replace(/\/+$/, "");
+  };
+  // 端口是给人看的：她说「8801 没应答」比说「连不上 DSH」有用得多。
+  const portOf = (u) => {
+    const m = String(u || "").match(/:(\d+)/);
+    return m ? m[1] : "默认地址";
+  };
+  // 地址不通时别急着下结论：先让主进程自愈一次（它会探原地址、必要时起随身桥接）。
+  // 修好了就改口说「改走随身桥接了」，只有真的没救才说「连不上」。
+  let healing = false;
+  const healBridge = () => {
+    if (healing) return Promise.resolve(false);
+    if (!window.deskfish || !window.deskfish.bridgeEnsure) return Promise.resolve(false);
+    healing = true;
+    return window.deskfish.bridgeEnsure({}).then((r) => {
+      healing = false;
+      const base = String((r && r.base) || "").replace(/\/+$/, "");
+      if (!r || !r.ok || !base) return false;
+      const from = bridgeBase;
+      if (base !== from) {
+        bridgeBase = base;
+        try { if (window.FishVoice && window.FishVoice.setBridgeUrl) window.FishVoice.setBridgeUrl(base); } catch (e) { }
+        // 直接落到「好了」的状态再说这句话，免得紧跟着又冒一句「连上了，我在。」
+        dshLink = "ok";
+        dshFail = 0;
+        try { say("原来那个地址（" + portOf(from) + "）没应答，我改走随身桥接了。", "calm", 4200); } catch (e) { }
+      } else {
+        setLink(true);
+      }
+      return true;
+    }).catch(() => { healing = false; return false; });
   };
   const pollDsh = () => {
     // 人不在就别打桥：每 8 秒一次 fetch，锁屏一整夜是几千次没人看的请求。

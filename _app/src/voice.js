@@ -315,22 +315,54 @@
     return false;
   }
 
+  // 地址不通时向主进程要一次可用地址：它会探原地址、必要时把随身桥接拉起来。
+  // 换成了就返回新地址，换不了返回空串（调用方据此决定要不要报错）。
+  async function healBridgeBase(why) {
+    try {
+      const api = window.deskfish || {};
+      if (!api.bridgeEnsure) return "";
+      const r = await api.bridgeEnsure({});
+      const base = String((r && r.base) || "").trim().replace(/\/+$/, "");
+      if (!r || !r.ok || !base) return "";
+      const from = BASE;
+      if (base === from) return base;
+      setBridgeUrl(base);
+      log("换个地址再试：" + from + " → " + base + "（" + (r.note || why || "") + "）");
+      try {
+        if (window.FishSay) window.FishSay("原来那个地址没应答，我改走随身桥接了", null, 3800);
+      } catch (e) { }
+      return base;
+    } catch (e) {
+      return "";
+    }
+  }
+
   // 用 text/plain 发 JSON：不触发 CORS 预检（bridge 没处理 OPTIONS）
-  async function postJson(path, body, _retried) {
+  async function postJson(path, body, _retried, _healed) {
     const t = await getToken();
-    const r = await fetch(BASE + path + "?t=" + encodeURIComponent(t), {
-      method: "POST",
-      headers: { "content-type": "text/plain;charset=UTF-8" },
-      body: JSON.stringify(body),
-      // 没有超时的 fetch 会把 busy 永远卡在 true：桥接那边一卡，
-      // 之后按什么按钮都没反应，看着就像程序死了。
-      signal: AbortSignal.timeout(20000),
-    });
+    let r;
+    try {
+      r = await fetch(BASE + path + "?t=" + encodeURIComponent(t), {
+        method: "POST",
+        headers: { "content-type": "text/plain;charset=UTF-8" },
+        body: JSON.stringify(body),
+        // 没有超时的 fetch 会把 busy 永远卡在 true：桥接那边一卡，
+        // 之后按什么按钮都没反应，看着就像程序死了。
+        signal: AbortSignal.timeout(20000),
+      });
+    } catch (e) {
+      // 地址写得不对、或者桥换了端口：自愈一次再送一遍，别让一句话就此丢掉。
+      if (!_healed && !/AbortError|timeout/i.test(String((e && e.message) || e))) {
+        const b = await healBridgeBase("发消息时连不上");
+        if (b) return postJson(path, body, _retried, true);
+      }
+      throw e;
+    }
     // 桥接重启会换一把 token：401 说明手上这个是旧的。清掉重取一次，
     // 否则用户得自己去设置里动一下地址才能恢复，看着就像程序坏了。
     if (r.status === 401 && !_retried) {
       token = null;
-      return postJson(path, body, true);
+      return postJson(path, body, true, _healed);
     }
     return r.json();
   }
