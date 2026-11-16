@@ -6,9 +6,9 @@
 不动语音。装上之后你能感知到的只有一处：看屏幕时 DSH 的用量不再一天几十万地涨，
 而且同一个「看屏幕会话」会一直被沿用，直到它真的太长才换新的。
 
-- 安装包 `大肥鱼-1.6.6-安装包.exe`（自动更新用同名硬链接 `dafeiyu-desk-setup-1.6.6.exe`）
+- 安装包在 Release 里叫 `dafeiyu-desk-setup-1.6.6.exe`（本地打包产物名是 `大肥鱼-1.6.6-安装包.exe`，同一份文件；资产名用 ASCII 是为了自动更新能按 `latest.yml` 里的 path 取到）
 - SHA-256 `53CB11AE4F96DBC6C3BC3CC3066EE84FA43F7BAC669F2C8C6B3DD861BBFA2856`
-- 核对：`Get-FileHash .\大肥鱼-1.6.6-安装包.exe -Algorithm SHA256`
+- 核对：`Get-FileHash .\dafeiyu-desk-setup-1.6.6.exe -Algorithm SHA256`
 
 逐条技术细节见 [CHANGELOG 的 1.6.6 一节](../CHANGELOG.md)，这里按「你会感知到什么」重排。
 

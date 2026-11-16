@@ -69,9 +69,9 @@ Windows 桌面上的 Live2D 挂件：她跟着鼠标看、被摸头会害羞，�
 
 安装包在 [Releases](https://github.com/hanhan9999999999999999999/dafeiyu-desk/releases/latest)：
 
-- 文件名 `大肥鱼-1.6.6-安装包.exe`（自动更新走同名硬链接 `dafeiyu-desk-setup-1.6.6.exe`），
-  约 **887.5 MB**（语音模型和运行环境都在里面，装完不用再下东西）。
-- 校验：`Get-FileHash .\大肥鱼-1.6.6-安装包.exe -Algorithm SHA256`
+- 从 Release 下载下来文件名是 `dafeiyu-desk-setup-1.6.6.exe`（GitHub 资产名只能是给它，自动更新也按这个名字取），
+  本地打包产物叫 `大肥鱼-1.6.6-安装包.exe`，两者内容完全一样，约 **887.5 MB**（语音模型和运行环境都在里面，装完不用再下东西）。
+- 校验：`Get-FileHash .\dafeiyu-desk-setup-1.6.6.exe -Algorithm SHA256`
   → `53CB11AE4F96DBC6C3BC3CC3066EE84FA43F7BAC669F2C8C6B3DD861BBFA2856`
 - 1.6.6 只动了「看屏幕」这一条链路：会话沿用、用量收敛、不再白预热、不再卡 75 秒。细节见[发版说明](docs/RELEASE-1.6.6.md)。
 - **不捆绑模型**：Cubism 模型按版权单独分发。程序自带一只「大肥鱼」，换成你自己的模型走设置里的
