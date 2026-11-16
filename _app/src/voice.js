@@ -790,6 +790,29 @@
       close() { closed = true; },
       async drain() {
         let played = 0;
+        // ① 首句走的是「时间轴播放器」这条独立的路。它没播完之前不能抢话筒 ——
+        //    否则下一句会盖在第一句上面，听起来就是第一句卡在半截。
+        if (pcmPlayer && !pcmPlayer.closed) {
+          try { await pcmPlayer.wait(); } catch (e) { }
+        }
+        // ② 剩下的句子也排进同一根时间轴：句与句采样级首尾相接。
+        //    以前每句 new Audio(url)，起播要靠 media 元素自己加载，
+        //    句间那几十到几百毫秒的空档就是这么来的。
+        const player = createPcmPlayer();
+        if (player) {
+          if (pcmPlayer) { try { pcmPlayer.stop(); } catch (e) { } }
+          pcmPlayer = player;
+          if (!mouthRaf) mouthRaf = requestAnimationFrame(mouthLoop);
+        }
+        let aborted = false;
+        // 一个 URL 要么交给时间轴（解码后排队），要么回落到 <audio>。
+        const consume = async (url) => {
+          if (!player) { await playAudio(url); return; }
+          const r = await fetch(url);
+          if (!r.ok) throw new Error("取不到音频 HTTP " + r.status);
+          const buf = await r.arrayBuffer();
+          await player.push(new Uint8Array(buf));
+        };
         if (mark === speechAbort) {
           const t0 = Date.now();
           while (!urls.length && producing && Date.now() - t0 < 60000) {
@@ -798,12 +821,12 @@
           }
         }
         for (;;) {
-          if (mark !== speechAbort) break;
+          if (mark !== speechAbort) { aborted = true; break; }
           const url = urls.shift();
           if (url) {
             try {
               if (!played && onFirstPlay) onFirstPlay();
-              await playAudio(url);
+              await consume(url);
               played += 1;
             } catch (e) { log("播放失败 " + (e && e.message ? e.message : e)); }
             if (url.startsWith("blob:")) {
@@ -813,6 +836,15 @@
           }
           if (!producing) break;
           await sleep(30);
+        }
+        if (player) {
+          if (aborted) {
+            // 被打断：立刻收声，别让剩下的句子继续往外冒。
+            try { player.stop(); } catch (e) { }
+          } else {
+            try { await player.end(); } catch (e) { }
+          }
+          if (pcmPlayer === player) pcmPlayer = null;
         }
         try { await producer; } catch (e) { }
         return played;
@@ -1661,7 +1693,17 @@
       },
       firstStartIn() { return firstAt ? Math.max(0, firstAt - c.currentTime) : 0; },
       setVolume(v) { try { gain.gain.value = muted ? 0 : Math.max(0, Math.min(1, v)); } catch (e) { } },
-      end() { arm(); if (!sources.length) finish(); return allDone; },
+      // 收尾：先把还没解完的块等完，再看时间轴。
+      // 踩过的坑：解码是异步的，`end()` 在 readerTask 结束后就被调用，
+      // 那时 sources 可能还是空的（还有块在 decodeAudioData 里）—— 于是它
+      // 立刻认为「播完了」，调用方马上去播下一句，第一句就卡在半截。
+      // 表现：只有第一句会被打断，后面的句子都是排进同一根时间轴，反而连得挺好。
+      async end() {
+        try { await chain; } catch (e) { }
+        if (!at) { finish(); return allDone; }
+        arm();
+        return allDone;
+      },
       stop() {
         dead = true;
         try { sources.forEach((s) => { try { s.stop(); } catch (e) { } try { s.disconnect(); } catch (e) { } }); } catch (e) { }

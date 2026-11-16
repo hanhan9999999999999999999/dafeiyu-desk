@@ -54,6 +54,42 @@ const PROFILE = (() => {
 const TOKEN = process.env.FISH_BRIDGE_TOKEN || crypto.randomBytes(9).toString('hex');
 const MAX_MESSAGES = 200;
 
+// ---------- 用量账本 ----------
+// DSH 每一轮的 token 只在 session.event 里（assistant/message 带 usage），
+// 而大肥鱼主进程拿不到那些事件 —— 所以这里留一份，等它来问 /api/usage。
+// 各家字段名不统一（camelCase / snake_case 都有），取值一律走 pickNum 兜一圈。
+const usageTurns = [];
+const USAGE_MAX = 500;
+
+function pickNum(o, keys) {
+  for (const k of keys) {
+    const v = Number(o && o[k]);
+    if (Number.isFinite(v) && v > 0) return v;
+  }
+  return 0;
+}
+
+function noteUsage(usage, model) {
+  if (!usage) return null;
+  const prompt = pickNum(usage, ['inputTokens', 'input_tokens', 'promptTokens', 'prompt_tokens']);
+  const completion = pickNum(usage, ['outputTokens', 'output_tokens', 'completionTokens', 'completion_tokens']);
+  const total = pickNum(usage, ['totalTokens', 'total_tokens']) || prompt + completion;
+  if (!total) return null;
+  const t = {
+    id: 'u' + crypto.randomUUID(),
+    at: Date.now(),
+    model: String(model || MODEL),
+    prompt,
+    completion,
+    total,
+    ctxUsed: pickNum(usage, ['contextTokens', 'context_tokens', 'promptTokens', 'prompt_tokens']) || total,
+    ctxMax: pickNum(usage, ['contextWindow', 'context_window', 'ctxMax', 'maxTokens', 'max_tokens']),
+  };
+  usageTurns.push(t);
+  if (usageTurns.length > USAGE_MAX) usageTurns.splice(0, usageTurns.length - USAGE_MAX);
+  return t;
+}
+
 const log = (...a) => {
   try { console.log('[mini]', ...a); } catch (e) { }
 };
@@ -318,6 +354,8 @@ const server = http.createServer(async (req, res) => {
               }
             }
             if (ev.type === 'session' && ev.sessionId) sessionId = ev.sessionId;
+            // 一轮结束：这一轮花了多少 token 记一笔，等大肥鱼来收。
+            if (ev.type === 'status' && ev.phase === 'turn_end') noteUsage(ev.usage, MODEL);
           },
         });
         lastError = '';
@@ -368,6 +406,8 @@ const server = http.createServer(async (req, res) => {
         onSession: (sid) => { visionSessionId = sid; },
         onEvent: (ev) => {
           if (ev.type === 'text' && ev.text) texts.push(String(ev.text));
+          // 看屏幕也是一次真实的模型调用，同样要记进用量。
+          if (ev.type === 'status' && ev.phase === 'turn_end') noteUsage(ev.usage, MODEL + ' · 看屏幕');
         },
       });
       // runner 可能同时推 attempt（半成品）和 message（定稿）；取最长的那份。
@@ -400,6 +440,14 @@ const server = http.createServer(async (req, res) => {
         turnId: m.id, completed: !m.streaming, thinking: '', tools: [], steps: [],
       })),
     });
+  }
+
+  // 用量：大肥鱼主进程定时来问「上次拉到这条之后又花了多少」。
+  // since 用毫秒时间戳，只回严格更新的那些，避免同一轮被记两次。
+  if (p === '/api/usage' && req.method === 'GET') {
+    const since = Number(u.searchParams.get('since') || 0) || 0;
+    const list = since ? usageTurns.filter((t) => t.at > since) : usageTurns.slice();
+    return json(res, 200, { ok: true, model: MODEL, turns: list });
   }
 
   return json(res, 404, { ok: false, error: '没有这个接口' });

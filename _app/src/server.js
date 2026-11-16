@@ -97,6 +97,37 @@ function startServer(opts) {
 
       // ── 内置 TTS：文字 → 音频文件 ──────────────────
       // ── 有哪些声音可选（设置页的下拉用） ──────────
+      // 用量账本：设置页「用量」页读这一条。
+      // 先 pull 一趟（去迷你桥把 DSH 这几轮的消耗收回来），保证点开就是最新数字。
+      if (url === "/usage/summary" && req.method === "GET") {
+        (async () => {
+          try {
+            if (opts.usage && opts.usage.pull) { try { await opts.usage.pull(); } catch (e) { } }
+            const s = (opts.usage && opts.usage.summary) ? opts.usage.summary() : { ok: false, error: "这个版本还没有用量账本" };
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+            res.end(JSON.stringify(Object.assign({ ok: true }, s)));
+          } catch (e) {
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+            res.end(JSON.stringify({ ok: false, error: String((e && e.message) || e) }));
+          }
+        })();
+        return;
+      }
+
+      if (url === "/usage/clear" && req.method === "POST") {
+        (async () => {
+          try {
+            const done = (opts.usage && opts.usage.clear) ? opts.usage.clear() : false;
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+            res.end(JSON.stringify({ ok: !!done }));
+          } catch (e) {
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+            res.end(JSON.stringify({ ok: false, error: String((e && e.message) || e) }));
+          }
+        })();
+        return;
+      }
+
       if (url === "/engine/voices" && req.method === "GET") {
         (async () => {
           try {

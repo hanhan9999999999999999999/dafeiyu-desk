@@ -142,11 +142,11 @@
       "why": "同上，第二条回调（表达式预览）。两条分开是因为它们各自可以被单独关掉。"
     },
     {
-      "where": "src/server.js:729",
+      "where": "src/server.js:760",
       "why": "每次 listen() 都新建一个 server 对象，once(\"error\") 挂在那个新对象上。"
     },
     {
-      "where": "src/server.js:730",
+      "where": "src/server.js:761",
       "why": "同上，once(\"listening\") 也是一次性。"
     }
   ]

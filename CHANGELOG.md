@@ -1,5 +1,55 @@
 # 更新日志
 
+## 1.6.3 — 2026-11-16
+
+两件事：**第一句话总被第二句盖掉**，以及**看不到她到底花了多少 token**。
+
+### 第一句不再被下一句掐断
+
+飞鱼出声是「一句一条时间轴」：第一句交给 `speakFeiyuStream()` 边走边排，
+其余句子等整段回复写完再交给 `drain()`。两个真因叠在一起：
+
+1. `createPcmPlayer().end()` 原来只看「已经排进时间轴的块」，可块还在
+   `decodeAudioData` 里 —— `speakFeiyuStream()` 在 `await readerTask` 之后立刻
+   `await player.end()`，此刻 `sources` 还是空的，于是立刻判定「播完了」。
+   调用方拿到 `true` 就去播第二句，第一句被 `pcmPlayer.stop()` 掐在半句上。
+   **只有第一句走这条路，所以只有第一句有这个毛病。**
+   现在 `end()` 先 `await chain`（等解码链落地），再看 `at`（时间轴有没有东西）。
+2. `drain()` 起手不等第一句，直接开新播放器。现在开头先 `await pcmPlayer.wait()`。
+
+顺带把交接方式也换了：以前每一句都 `new Audio(url)`，句间靠 media 元素自己加载，
+几十到几百毫秒的空档就是这么来的。现在 `drain()` 开一根时间轴，把剩下的句子
+`fetch` 下来 `push` 进去，采样级首尾相接；`aborted` 时整条停掉。
+
+- 新增 `scripts/test-voice-timeline.js`（8 条）：用假 AudioContext 复现
+  「解码没落地就 end()」的时序，钉住「不提前收工」「没排块时立刻返回」
+  「两块总时长 = 1.0」「stop() 之后不再排片」。
+- 校验：`node --check src/voice.js`；`verify-src` 1318 条断言；`test:voice-timeline` 8 通过。
+
+### 设置里能看见「她花了多少 token」
+
+新增第 8 页「用量」：今天 / 近 7 天 / 累计三张卡、按来源的占比条、
+近 14 天柱状图、最近 24 轮明细（时间、来源、模型、输入、输出、合计），
+以及账本文件位置与清空入口。
+
+- `src/usage.js`：账本本体。一轮一条记录，字段归一化（`prompt_tokens` /
+  `input_tokens` / `inputTokens` 三种写法都认），同一 id 重复送到只算一次，
+  超过 120 天或 600 轮的自动裁掉，写盘走「临时文件 + rename」。
+- DSH 侧：`bridge/mini-bridge.mjs` 在 `turn_end` 事件里把 usage 记进内存账本
+  （上限 500 轮），暴露 `GET /api/usage?since=`；主进程 `usagePull()` 每 45 秒
+  巡检时顺带收一次，按时间戳游标增量拉，不会重复记账。看屏幕那一路
+  （独立 runner、独立会话）也记，模型名标成 `deepseek-flash · 看屏幕`。
+- 自定义 API 侧：`api:chat` 转发时直接读响应体里的 `usage` 入账。
+- 页面走 `GET /usage/summary`（`server.js` → `usage.summary()`），
+  行 20 秒自对一次账；`POST /usage/clear` 清空。
+- 新增 `scripts/test-usage.js`（30 条）：账本行为 16 条 + 接线 14 条。
+
+### 其它
+
+- 离屏预览工具（`.ui-shots/build.js`）现在会摘掉副本里的 CSP —— 之前内联桩被
+  `script-src 'self'` 全拦掉，截出来的设置页全是「正在读取…」。
+- `scripts/lib/listeners-reg.json` 的 except 行号跟着 `server.js` 的新增行同步（729/730 → 760/761）。
+
 ## 1.6.2 — 2026-11-16
 
 主人验收时又撞见两件事：**话没发出去时她只会说「连不上 DSH」**，以及

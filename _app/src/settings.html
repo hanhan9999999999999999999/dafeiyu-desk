@@ -364,6 +364,46 @@
   .ovcard.go:hover{border-color:#3a5185; background:linear-gradient(180deg,#1b2740,#141d31); transform:translateY(-1px);}
   .ovcard.go:focus-visible{outline:2px solid #5b8cff; outline-offset:2px;}
   .ovcard.go:active{transform:translateY(0);}
+
+  /* ---------- 用量页 ---------- */
+  /* 三张数字卡跟概览同构，别让两页看起来像两个人做的 */
+  .ugrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-bottom:14px;}
+  .ucard{
+    background:linear-gradient(180deg,var(--panel),var(--bg2)); border:1px solid var(--line);
+    border-radius:12px; padding:12px 14px;
+  }
+  .ucard .k{font-size:10.5px; letter-spacing:.8px; color:var(--faint);}
+  .ucard .v{font-size:20px; font-weight:650; margin-top:6px; letter-spacing:.3px;}
+  .ucard .v small{font-size:11px; font-weight:400; color:var(--dim); margin-left:3px;}
+  .ucard .s{font-size:11px; color:var(--dim); margin-top:4px;}
+  /* 来源条：一条一种来源，条长就是占比，数字在右边 */
+  .ubar{display:flex; align-items:center; gap:10px; padding:7px 0;}
+  .ubar .nm{width:92px; font-size:12px; color:var(--text); flex:none;}
+  .ubar .track{flex:1; height:8px; border-radius:99px; background:#131c2e; overflow:hidden; border:1px solid #1d2942;}
+  .ubar .fill{height:100%; border-radius:99px; background:linear-gradient(90deg,#5b8cff,#7fa8ff); width:0; transition:width .35s ease;}
+  .ubar .fill.api{background:linear-gradient(90deg,#3ddc97,#7ff0c0);}
+  .ubar .fill.other{background:linear-gradient(90deg,#8d93a8,#b6bccd);}
+  .ubar .num{width:150px; text-align:right; font-size:11.5px; color:var(--dim); flex:none;}
+  /* 近两周柱状图：用 flex 排，柱高按最大值归一 */
+  .uchart{display:flex; align-items:flex-end; gap:6px; height:112px; padding:6px 2px 0;}
+  .uchart .col{flex:1; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; gap:5px; min-width:0;}
+  .uchart .bar{width:100%; max-width:26px; border-radius:5px 5px 2px 2px; background:linear-gradient(180deg,#5b8cff,#3a5fb8); min-height:2px;}
+  .uchart .bar.zero{background:#1d2942;}
+  .uchart .cap{font-size:9.5px; color:var(--faint); white-space:nowrap;}
+  .utable{width:100%; border-collapse:collapse; font-size:12px;}
+  .utable th{
+    text-align:left; font-weight:500; color:var(--faint); font-size:10.5px; letter-spacing:.6px;
+    padding:0 8px 6px; border-bottom:1px solid var(--line);
+  }
+  .utable td{padding:7px 8px; border-bottom:1px solid #1a2436; color:var(--text); white-space:nowrap;}
+  .utable td.num{text-align:right; font-variant-numeric:tabular-nums;}
+  .utable tr:last-child td{border-bottom:none;}
+  .utable .src{font-size:11px; color:var(--dim);}
+  .utable .src.dsh{color:#8fb2ff;}
+  .utable .src.api{color:#5fdcb0;}
+  /* 清空按钮：不是常用动作，红色但克制 */
+  button.mini.danger{border-color:#5a2b36; color:#ff9aa9; background:#241a22;}
+  button.mini.danger:hover{border-color:#8d3f4f; background:#2c1e27; color:#ffc2cc;}
   .quick{display:flex; flex-wrap:wrap; gap:8px; padding:10px 0 8px;}
   .quick button{
     border:1px solid var(--line2); background:#1b2740; color:var(--text);
@@ -395,6 +435,7 @@
       <button role="tab" aria-selected="false" class="tab" data-page="hotkeys"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.9" y="6.2" width="18.2" height="11.6" rx="2.4" /><path d="M6.6 9.9h.02M9.7 9.9h.02M12.8 9.9h.02M15.9 9.9h.02" /><path d="M8.2 14.1h7.6" /></svg></i><span>快捷键</span></button>
       <button role="tab" aria-selected="false" class="tab" data-page="see"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.4 12S5.9 5.6 12 5.6 21.6 12 21.6 12 18.1 18.4 12 18.4 2.4 12 2.4 12z" /><circle cx="12" cy="12" r="2.7" /></svg></i><span>看屏幕</span></button>
       <button role="tab" aria-selected="false" class="tab" data-page="connect"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.4 14.6 14.6 9.4" /><path d="M12.6 6.6 14.4 4.8a4.15 4.15 0 1 1 5.87 5.87l-1.8 1.8" /><path d="M11.4 17.4 9.6 19.2a4.15 4.15 0 1 1-5.87-5.87l1.8-1.8" /></svg></i><span>连接与模型</span></button>
+      <button role="tab" aria-selected="false" class="tab" data-page="usage"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.4v17.2" /><path d="M17.1 7.6c-1-1.6-2.8-2.5-5-2.5-2.9 0-4.6 1.4-4.6 3.5 0 2.2 1.9 3 5.1 3.5 3.4.5 5.3 1.5 5.3 3.9 0 2.3-2 3.9-5.4 3.9-2.6 0-4.6-.9-5.6-2.6" /></svg></i><span>用量</span></button>
       <button role="tab" aria-selected="false" class="tab" data-page="about"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.3" /><path d="M12 11.1v5.3" /><path d="M12 7.9h.02" /></svg></i><span>关于</span></button>
     </nav>
 
@@ -1110,6 +1151,60 @@
         </div>
       </section>
 
+      <!-- 用量：她每次开口、每次看屏幕都在这里记一笔 -->
+      <section role="tabpanel" class="page" data-page="usage">
+        <div class="ph">
+          <h1>用量</h1>
+          <p>她每次回话、每次看屏幕，花掉多少 token 都记在这里 —— DSH 对话和自己填的 API 分开算。</p>
+        </div>
+
+        <div class="ugrid">
+          <div class="ucard">
+            <div class="k">今天</div>
+            <div class="v" id="usageToday">—</div>
+            <div class="s" id="usageTodaySub">—</div>
+          </div>
+          <div class="ucard">
+            <div class="k">近 7 天</div>
+            <div class="v" id="usageWeek">—</div>
+            <div class="s" id="usageWeekSub">—</div>
+          </div>
+          <div class="ucard">
+            <div class="k">累计</div>
+            <div class="v" id="usageTotal">—</div>
+            <div class="s" id="usageTotalSub">—</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>谁花掉的<span class="hint" id="usageSrcHint">按总量排序</span></h3>
+          <div id="usageSrcList"><p class="hint">正在读取…</p></div>
+        </div>
+
+        <div class="card">
+          <h3>最近 14 天<span class="hint">没说话的那天就是空的</span></h3>
+          <div id="usageChart" class="uchart"></div>
+        </div>
+
+        <div class="card">
+          <h3>最近几轮<span class="hint" id="usageRecentHint">输入 / 输出分开看</span></h3>
+          <div id="usageRecent"><p class="hint">正在读取…</p></div>
+        </div>
+
+        <div class="card">
+          <h3>这份账本<span class="hint">只存在你自己的电脑上</span></h3>
+          <p class="hint">记的是每一轮对话的 token 数（输入 + 输出）。DSH 那边由随身桥接每 45 秒回收一次；自己填的 API 在回话时顺手记下。</p>
+          <div class="row">
+            <div class="label">记录文件<small id="usageFile">—</small></div>
+            <button id="usageRefresh" class="mini">刷新</button>
+          </div>
+          <div class="row">
+            <div class="label">清空<small>只删这份用量记录，不碰聊天记录，也不影响她的记忆</small></div>
+            <button id="usageClear" class="mini danger">清空用量记录</button>
+          </div>
+        </div>
+      </section>
+
       <!-- 关于 -->
       <section role="tabpanel" class="page" data-page="about">
         <div class="ph">
@@ -1188,6 +1283,7 @@
 <script src="settings-shell.js"></script>
 <script src="lib/micerr.js"></script>
 <script src="settings-renderer.js"></script>
+  <script src="usage-page.js"></script>
 </body>
 </html>
 

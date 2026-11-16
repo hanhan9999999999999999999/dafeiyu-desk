@@ -1006,6 +1006,69 @@ const { createIdleCache } = require("./idle-cache");
 // 台词池本身：主进程要拿它算「一共多少句闲置词」，设置页要按清单显示进度。
 // lines.js 同时挂着 window.FishLines（渲染进程）和 module.exports（这里）。
 const Lines = require("./lines");
+// token 账本：DSH 对话与自定义 API 的消耗都记在这里，设置页「用量」页读它。
+const USAGE = require("./usage");
+
+// 把一次调用的 usage 写进账本。调用点有两处（api:chat 的响应、桥接的 turn_end），
+// 字段命名各家不同，统一交给 usage.js 归一化。
+function recordUsage(o) {
+  try {
+    const u = (o && o.usage) || {};
+    const prompt = Number(u.prompt_tokens || u.input_tokens || 0) || 0;
+    const completion = Number(u.completion_tokens || u.output_tokens || 0) || 0;
+    const total = Number(u.total_tokens || 0) || prompt + completion;
+    if (!total) return null;
+    return USAGE.add(app.getPath("userData"), {
+      id: (o && o.id) || "",
+      at: (o && o.at) || Date.now(),
+      src: (o && o.src) || "other",
+      model: (o && o.model) || "",
+      prompt,
+      completion,
+      total,
+      ctxUsed: Number((o && o.ctxUsed) || 0) || total,
+      ctxMax: Number((o && o.ctxMax) || 0) || 0,
+      note: (o && o.note) || "",
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
+// DSH 那边的用量在迷你桥里（它拿着 DSH 子进程的 session.event）。
+// 大肥鱼自己不跑 DSH，只能定时去问一趟：「上次拉到这条之后，又花了多少」。
+let usageCursor = 0;
+let usagePulling = false;
+async function usagePull() {
+  if (usagePulling) return 0;
+  const st = miniStatus();
+  if (!st.running) return 0;
+  usagePulling = true;
+  try {
+    const r = await net.fetch("http://127.0.0.1:" + MINI_PORT + "/api/usage?since=" + usageCursor, {
+      cache: "no-store",
+    });
+    if (!r.ok) return 0;
+    const j = await r.json().catch(() => null);
+    const list = (j && Array.isArray(j.turns)) ? j.turns : [];
+    let n = 0;
+    for (const t of list) {
+      const added = recordUsage({
+        id: t.id, at: t.at, src: "dsh", model: t.model,
+        usage: { prompt_tokens: t.prompt, completion_tokens: t.completion, total_tokens: t.total },
+        ctxUsed: t.ctxUsed, ctxMax: t.ctxMax,
+      });
+      if (added) n += 1;
+      if (Number(t.at) > usageCursor) usageCursor = Number(t.at);
+    }
+    return n;
+  } catch (e) {
+    return 0;
+  } finally {
+    usagePulling = false;
+  }
+}
+
 
 // 闲置词语音缓存：目录放在 userData 下（跟语音缓存 cacheDir 分开，
 // 这里是「预合成好的一套台词」，不该被 TTS 的 LRU 清掉）。
@@ -1142,6 +1205,13 @@ async function bootServer() {
     // 闲置词的预合成缓存：服务端只负责按白名单把文件发出去（带 Range），
     // 目录与命名规则全在 idle-cache.js 里，两边不做各自的判断。
     idle: IDLE_CACHE,
+    // 设置页的「用量」页直接 fetch('/usage/summary')，服务端转手问账本；
+    // 顺手先拉一趟 DSH 的记录，保证点开就是最新数字。
+    usage: {
+      pull: () => usagePull(),
+      summary: () => USAGE.summary(app.getPath("userData"), { days: 14, recent: 24 }),
+      clear: () => USAGE.clear(app.getPath("userData")),
+    },
     // 服务端拿不到窗口对象，用回调把「在等声音」这种提示送回渲染层。
     notify: (channel, payload) => {
       try {
@@ -3486,6 +3556,15 @@ ipcMain.handle("api:chat", async (_e, req0) => {
     const msg = j && j.choices && j.choices[0] && j.choices[0].message;
     const reply = String((msg && msg.content) || "").trim();
     if (!reply) return { ok: false, error: "API 没给出内容" };
+    // 顺手入账：这次对话花了多少 token 只有这里看得到（渲染进程拿不到 usage）。
+    try {
+      recordUsage({
+        src: "api",
+        model: (j && j.model) || model,
+        usage: (j && j.usage) || null,
+        ctxUsed: Number(j && j.usage && (j.usage.total_tokens || j.usage.prompt_tokens)) || 0,
+      });
+    } catch (e) { }
     return { ok: true, reply, model: (j && j.model) || model };
   } catch (e) {
     const msg = String((e && e.message) || e);
@@ -3733,6 +3812,16 @@ ipcMain.handle("see:snapshot", async () => {
   // 设置里「试一眼」：抓当前屏幕直接分析一次，不要求监视窗开着。
   const r = await seeTick(true);
   return r;
+});
+
+// 设置页「用量」：先把 DSH 那边的记录拉一趟，再回总账。
+ipcMain.handle("usage:summary", async () => {
+  await usagePull();
+  return USAGE.summary(app.getPath("userData"), { days: 14, recent: 24 });
+});
+ipcMain.handle("usage:clear", () => {
+  const okDone = USAGE.clear(app.getPath("userData"));
+  return { ok: !!okDone };
 });
 
 ipcMain.handle("pet:open", () => { openPetPanel(); return true; });
@@ -5679,6 +5768,8 @@ app.whenReady().then(async () => {
         bridgeEnsure({ quiet: true })
           .then((r) => { if (!r.ok) log("[bridge] 巡检出问题：" + r.note); })
           .catch(() => { });
+        // 顺手把这一分钟的 DSH 用量收进账本；设置页点开「用量」时看到的是最近的数。
+        usagePull().catch(() => { });
       }, 45 * 1000);
       try { bridgeWatchTimer.unref(); } catch (e) { }
     }
