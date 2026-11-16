@@ -108,3 +108,6 @@ DeepSeek Live2D Model/psd/
 **/__pycache__/
 .git-commit-msg.txt
 .ui-shots/.edge-profile/
+.ui-shots/*.ps1
+.ui-shots/rel-id.txt
+.ui-shots/shot-*.mjs
