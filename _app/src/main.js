@@ -129,6 +129,9 @@ function applyStorageDirs() {
 const MINI_PORT = 8898;                  // 避开 phone-bridge 的 8899
 const MINI_SCRIPT = () => path.join(RES_ROOT, "bridge", "mini-bridge.mjs");
 let miniProc = null;
+// 我们自己 taskkill 掉的桥接，退出码同样是 1，别把它记成「崩了又重拉」——
+// 日志里那句「迷你桥不在了（exit code=1）」会让人以为是桥本身有毛病。
+let miniStopping = false;
 let miniLastError = "";
 
 // ── RVC 音色转换服务 ──────────────────────────────
@@ -366,6 +369,21 @@ function isLoopbackUrl(u) {
   }
 }
 
+// 设置一变，两个窗口都要知道。以前只发给主窗口（win），设置页的输入框留着旧值，
+// 下一次保存又把旧值写回磁盘 —— 主进程刚把 bridgeUrl 指到自带桥，就被它改回 8899，
+// 于是「外部桥不通 → 指到自带桥 → 又被写回 8899」无限循环，语音永远 Failed to fetch。
+function broadcastSettings() {
+  const s = S.get();
+  for (const w of [win, settingsWin]) {
+    try {
+      if (w && !w.isDestroyed() && w.webContents && !w.webContents.isDestroyed()) {
+        w.webContents.send("settings-changed", s);
+      }
+    } catch (e) { }
+  }
+  return s;
+}
+
 // 把 bridgeUrl 指到自带桥。只有「本机地址」才动，远端配置原样留着。
 function bridgePointToMini() {
   const miniUrl = "http://127.0.0.1:" + MINI_PORT;
@@ -378,7 +396,7 @@ function bridgePointToMini() {
     }
     S.patch({ bridgeUrl: miniUrl });
     log("[bridge] 外部桥不通，bridgeUrl 已改指自带桥 " + miniUrl);
-    try { win && win.webContents.send("settings-changed", S.get()); } catch (e) { }
+    try { broadcastSettings(); } catch (e) { }
     return miniUrl;
   } catch (e) {
     return bridgeBase();
@@ -489,7 +507,7 @@ function miniFixBridgeUrl() {
     if (cur) return;
     S.patch({ bridgeUrl: BRIDGE_DEFAULT });
     log("[main] bridgeUrl 为空，已填默认 " + BRIDGE_DEFAULT);
-    try { win && win.webContents.send("settings-changed", S.get()); } catch (e) { }
+    try { broadcastSettings(); } catch (e) { }
   } catch (e) { }
 }
 
@@ -588,9 +606,15 @@ async function miniStart() {
       log("[bridge!] " + miniLastError);
     });
     miniProc.on("close", (code) => {
-      if (code !== 0) miniLastError = "桥接退出（code=" + code + "）";
+      const mine = miniStopping;
+      miniStopping = false;
       miniProc = null;
       miniAnswering = false;
+      if (mine) {
+        log("[bridge] 自带桥接已按我们的要求收掉（不是崩溃）");
+        return;
+      }
+      if (code !== 0) miniLastError = "桥接退出（code=" + code + "）";
       // 不是我们主动关的（退出时 miniStop 会先置 appQuitting），就安排一次重拉。
       miniScheduleRestart("exit code=" + code);
     });
@@ -617,6 +641,7 @@ async function miniStart() {
 function miniStop() {
   try {
     if (miniProc && miniProc.pid) {
+      miniStopping = true;
       try {
         require("node:child_process").execFileSync("taskkill", ["/T", "/F", "/PID", String(miniProc.pid)], { stdio: "ignore" });
       } catch (e) { }
@@ -1774,9 +1799,8 @@ function applySettings(patch) {
     win.__ignoreMouse = !!s.clickThrough;
   }
   // 渲染侧要跟着变的项（锐化 / 分辨率 / 跟随 / 小动作 / 眨眼）
-  if (win.webContents && !win.webContents.isDestroyed()) {
-    win.webContents.send("settings-changed", s);
-  }
+  // 设置页也要收到：它那边留着旧值，下次保存会把这里刚改的项写回去。
+  broadcastSettings();
 
   // 窗口尺寸一改，取景必须重算，否则模型还是按旧容器在放大，
   // 表现就是"窗口大了但只看得见一块衣领"。

@@ -66,8 +66,10 @@ same("mute 传 0 被忽略（0 不是 false）", sanitize({ mute: 0 }).mute, fal
 same("apiKey 传数字回空串", sanitize({ apiKey: 123 }).apiKey, "");
 same("apiBase 不是 http(s) 回空串", sanitize({ apiBase: "file:///etc/passwd" }).apiBase, "");
 same("bridgeUrl 不是 http(s) 回默认", sanitize({ bridgeUrl: "javascript:alert(1)" }).bridgeUrl, DEFAULTS.bridgeUrl);
-same("老默认 8898 被迁到 8899（自带桥接已撤）",
-  sanitize({ bridgeUrl: "http://127.0.0.1:8898" }).bridgeUrl, "http://127.0.0.1:8899");
+same("自带桥接的 8898 原样保留（1.6.1 起不再被改写）",
+  sanitize({ bridgeUrl: "http://127.0.0.1:8898" }).bridgeUrl, "http://127.0.0.1:8898");
+same("局域网地址原样保留",
+  sanitize({ bridgeUrl: "http://192.168.1.226:8899" }).bridgeUrl, "http://192.168.1.226:8899");
 same("feiyuRefDir 不含斜杠 → 空（否则拼出全是错的路径）", sanitize({ feiyuRefDir: "语音" }).feiyuRefDir, "");
 same("feiyuHome 含反斜杠就保留", sanitize({ feiyuHome: "D:\\feiyu" }).feiyuHome, "D:\\feiyu");
 same("feiyuRef 被截到 120 字", sanitize({ feiyuRef: "x".repeat(500) }).feiyuRef.length, 120);
@@ -111,7 +113,7 @@ same("pth 后端配 dml 设备被判不配套，改 cuda:0", sanitize({ rvcBacke
   const changed = migrate(d);
   check("v1 配置被迁移（返回 true）", changed === true);
   same("迁移后 version 变 2", d.version, 2);
-  same("迁移后 8898 变 8899", d.bridgeUrl, "http://127.0.0.1:8899");
+  same("迁移后 8898 原样保留（自带桥接又回来了）", d.bridgeUrl, "http://127.0.0.1:8898/");
   check("已经是 v2 时 migrate 不动（返回 false）", migrate({ version: 2 }) === false);
 }
 

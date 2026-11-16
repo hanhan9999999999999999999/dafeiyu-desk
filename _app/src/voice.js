@@ -219,7 +219,11 @@
   // 不是「Failed to fetch」——后者除了让人一头雾水没有任何用。
   function humanErr(e) {
     const m = String((e && e.message) || e || "");
-    if (/Failed to fetch|NetworkError|ERR_CONNECTION|ERR_NAME/i.test(m)) return "连不上 DSH，检查一下桥接地址";
+    if (/Failed to fetch|NetworkError|ERR_CONNECTION|ERR_NAME/i.test(m)) {
+      // 带上当前地址：主人照着这一句就能看出是端口写错了还是桥没起。
+      const port = (BASE.match(/:(\d+)/) || [])[1] || "";
+      return port ? "连不上 DSH（" + port + " 没应答），设置里点「自检并修复」" : "连不上 DSH，检查一下桥接地址";
+    }
     if (/AbortError|timeout|timed out/i.test(m)) return "那边太久没应，可能卡住了";
     if (/拿不到 token|拿不到 bridge 地址/.test(m)) return "桥接没给出凭证，地址可能填错了";
     if (/send 没成功/.test(m)) return "话没送出去，看看 DSH 那边还连着没";
@@ -285,6 +289,29 @@
       await new Promise((r) => setTimeout(r, 600));
     }
     log("等桥接超时 " + limit + "ms，仍然放行");
+    // 兜一层：主进程知道自带桥在哪。地址被写错（比如还留着外部 phone-bridge 的 8899）时，
+    // 这里主动要一次可用地址再试 3 秒 —— 别把「地址写错了」变成「一句话都没发出去」。
+    try {
+      if (window.deskfish && window.deskfish.bridgeEnsure) {
+        const r = await window.deskfish.bridgeEnsure({});
+        const base = String((r && r.base) || "").trim();
+        if (base) setBridgeUrl(base);
+        if (r && r.ok) {
+          const t1 = Date.now();
+          while (Date.now() - t1 < 3000) {
+            try {
+              const rr = await fetch(BASE + "/api/health", { cache: "no-store", signal: AbortSignal.timeout(2500) });
+              const jj = await rr.json();
+              if (jj && jj.ok) {
+                log("换到可用桥接 " + BASE + "（" + (r.note || "") + "）");
+                return true;
+              }
+            } catch (e) { }
+            await new Promise((r2) => setTimeout(r2, 400));
+          }
+        }
+      }
+    } catch (e) { }
     return false;
   }
 

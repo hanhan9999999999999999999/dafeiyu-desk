@@ -491,8 +491,7 @@ bindHotkey(els.hotkeySummon, "hotkeySummon");
 bindHotkey(els.hotkeyMute, "hotkeyMute");
 
 function paint(s) {
-  cur = s;
-  els.scaleNum.value = Math.round(s.scale * 100);
+  cur = s;  els.scaleNum.value = Math.round(s.scale * 100);
   els.opacityNum.value = Math.round(s.opacity * 100);
   els.volumeNum.value = Math.round((s.volume === undefined ? 0.85 : s.volume) * 100);
   if (els.bridgeUrl) els.bridgeUrl.value = s.bridgeUrl || "";
@@ -2018,6 +2017,23 @@ if (els.bridgeUrl) {
   els.bridgeUrl.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); els.bridgeUrl.blur(); }
     if (e.key === "Escape") e.stopPropagation();
+  });
+}
+
+// 主进程会自己改 bridgeUrl（外部桥不通就指到自带桥）。以前只通知主窗口，
+// 这个页面留着旧端口，下一次保存又把它写回磁盘，于是两边来回拉锯、
+// 语音一直 Failed to fetch。现在跟着变，但用户正在这个框里打字时不抢。
+if (api.onSettingsChanged) {
+  api.onSettingsChanged((s) => {
+    if (!s) return;
+    cur = s;
+    if (els.bridgeUrl && document.activeElement !== els.bridgeUrl) {
+      const want = String(s.bridgeUrl || "");
+      if (want && els.bridgeUrl.value !== want) els.bridgeUrl.value = want;
+    }
+    if (window.FishVoice && window.FishVoice.setBridgeUrl && s.bridgeUrl) {
+      window.FishVoice.setBridgeUrl(s.bridgeUrl);
+    }
   });
 }
 

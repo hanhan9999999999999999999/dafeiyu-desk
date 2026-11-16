@@ -44,6 +44,15 @@ has(feiyu, "const w = await warm(", "启动路径里调 warm()");
 has(feiyu, "只卸载模型，不结束那个进程", "关引擎遇到别人的进程只卸载模型");
 has(renderer, "j.external ?", "设置页会标出「这个进程不是本程序启动的」");
 
+console.log("设置页与主窗口不再互相拉锯");
+has(main, "function broadcastSettings()", "有 broadcastSettings()：两个窗口一起通知");
+has(main, "for (const w of [win, settingsWin])", "广播覆盖主窗口和设置页");
+has(main, "let miniStopping = false;", "自己收掉的桥接不再记成崩溃");
+has(renderer, "api.onSettingsChanged", "设置页会跟着主进程改 bridgeUrl");
+const voice = read("src/voice.js");
+has(voice, "window.deskfish.bridgeEnsure({})", "连不上时先问主进程要一个可用地址再试");
+has(voice, "没应答），设置里点", "报错带上端口，主人一眼看出是哪一步错");
+
 console.log("");
 console.log(`结果：${pass} 通过 ${fail} 失败`);
 process.exit(fail ? 1 : 0);

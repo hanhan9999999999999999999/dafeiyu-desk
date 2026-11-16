@@ -319,11 +319,12 @@ function sanitize(raw) {
   if (out.rvcBackend === "pth" && /^dml$/i.test(String(out.rvcDevice || ""))) out.rvcDevice = "cuda:0";
   out.rvcPitch = Math.round(clamp(out.rvcPitch, -12, 12) ?? 0);
 
-  // 自带的迷你桥接（8898）从发行版里撤掉之后，桥接地址只剩外部的 phone-bridge（8899）。
-  // 老默认值还留在配置里的话，每次启动都会往一个不相干的端口打健康探测。
-  if (out.bridgeUrl === "http://127.0.0.1:8898" || out.bridgeUrl === "http://127.0.0.1:8898/") {
-    out.bridgeUrl = "http://127.0.0.1:8899";
-  }
+  // 注意：这里【不要】再把 8898 改回 8899。
+  // 1.5.x 曾因为「自带迷你桥接从发行版里撤掉」把 8898 一律改写成 8899；
+  // 后来迷你桥接又回来了（bridge/mini-bridge.mjs，端口 8898），这条规则却留着，
+  // 于是主进程把 bridgeUrl 指到自带桥、sanitize 立刻改回 8899 →
+  // 「外部桥不通 → 指到自带桥 → 又被改回去」无限循环，语音永远 Failed to fetch。
+  // 用户填什么就是什么，合法 http(s) 地址一律保留。
 
   // 字符串字段兜底：手改配置写成数字/对象时，path.join、字符串比较都可能直接抛。
   // 这里不猜用户想表达什么，类型不对就回默认值。
@@ -335,14 +336,12 @@ function sanitize(raw) {
 }
 
 // 配置迁移：老版本留下的值修成现在能用的。返回 true 表示真改过，调用方负责落盘。
-// v2：桥接地址默认值 8898 → 8899（自带迷你桥接已撤，只剩外部 phone-bridge）。
+// v2：这一版【不再】把 8898 改成 8899 —— 自带迷你桥接又回来了，8898 是合法地址。
+// 迁移只把版本号推上去，地址原样保留（见 sanitize 里的说明）。
 function migrate(d) {
   let changed = false;
   const v = Number(d && d.version) || 0;
   if (v < 2) {
-    if (d.bridgeUrl === "http://127.0.0.1:8898" || d.bridgeUrl === "http://127.0.0.1:8898/") {
-      d.bridgeUrl = "http://127.0.0.1:8899";
-    }
     d.version = 2;
     changed = true;
   }
