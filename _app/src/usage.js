@@ -28,7 +28,16 @@ function read(dir) {
   try {
     const j = JSON.parse(fs.readFileSync(file(dir), "utf8"));
     if (j && Array.isArray(j.turns)) {
-      return { version: 1, turns: j.turns.filter((t) => t && Number(t.at) > 0) };
+      // 老账本里没有 cached 字段（1.6.3 之前记的），读的时候按同样的口径补出来，
+      // 免得升级之后旧记录看着像「输入 + 输出 ≠ 合计」。
+      const turns = j.turns.filter((t) => t && Number(t.at) > 0).map((t) => {
+        if (t.cached == null) {
+          const gap = Number(t.total || 0) - Number(t.prompt || 0) - Number(t.completion || 0);
+          return Object.assign({}, t, { cached: gap > 0 ? gap : 0 });
+        }
+        return t;
+      });
+      return { version: 1, turns };
     }
   } catch (e) { /* 文件还没写、或者被手动改坏了，都当作空账本 */ }
   return blank();
@@ -60,6 +69,11 @@ function normalize(rec) {
   const completion = num(rec.completion != null ? rec.completion : rec.completion_tokens != null ? rec.completion_tokens : rec.output_tokens);
   const total = num(rec.total != null ? rec.total : rec.total_tokens) || prompt + completion;
   if (!prompt && !completion && !total) return null;      // 没有数字的轮次不值得占一行
+  // DSH 报的 total_tokens 往往把「缓存命中的上下文」也算进去了（423 + 201 + 9088 = 9712），
+  // 光看输入/输出/合计三个数会觉得对不上。这里把差额单独记成 cached，
+  // 页面上写成「输入 423 + 缓存 9.1k」，合计就自洽了。
+  const cached = num(rec.cached != null ? rec.cached : rec.cached_tokens) ||
+    Math.max(0, total - prompt - completion);
   const src = rec.src === "dsh" || rec.src === "api" ? rec.src : "other";
   return {
     id: String(rec.id || (src + "-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8))),
@@ -69,6 +83,7 @@ function normalize(rec) {
     prompt,
     completion,
     total,
+    cached,
     ctxUsed: num(rec.ctxUsed),
     ctxMax: num(rec.ctxMax),
     note: String(rec.note || "").slice(0, 80),
@@ -109,12 +124,13 @@ function dayKey(ms) {
 const SRC_LABEL = { dsh: "DSH 对话", api: "自定义 API", other: "其他" };
 
 function bucket(list) {
-  const out = { turns: 0, tokens: 0, prompt: 0, completion: 0 };
+  const out = { turns: 0, tokens: 0, prompt: 0, completion: 0, cached: 0 };
   for (const t of list) {
     out.turns += 1;
     out.tokens += t.total;
     out.prompt += t.prompt;
     out.completion += t.completion;
+    out.cached += t.cached || 0;
   }
   return out;
 }
@@ -178,6 +194,7 @@ function summary(dir, opt) {
     recent: turns.slice(-recent).reverse().map((t) => ({
       at: t.at, src: t.src, label: SRC_LABEL[t.src] || t.src,
       model: t.model, prompt: t.prompt, completion: t.completion, total: t.total,
+      cached: t.cached || 0,
     })),
     ctx: last && last.ctxUsed ? { used: last.ctxUsed, max: last.ctxMax, at: last.at } : null,
     lastAt: last ? last.at : 0,

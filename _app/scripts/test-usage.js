@@ -61,6 +61,18 @@ function main() {
   // ⑥ 清空
   check("清空返回成功", usage.clear(dir) === true);
   check("清空后账本是 0", usage.summary(dir, { days: 14 }).total.turns === 0);
+
+  // ⑥.5 DSH 的 total_tokens 含缓存命中的上下文，差额要单独记成 cached，
+  //      否则页面上「输入 423 + 输出 201 = 合计 9712」看着像算错了。
+  const t2 = usage.add(dir, { id: "cache1", at: Date.now(), src: "dsh", model: "deepseek-flash", prompt: 423, completion: 201, total: 9712, ctxUsed: 9712 });
+  check("缓存差额被单独记下来", !!t2 && t2.cached === 9088, "实测 " + (t2 && t2.cached));
+  const s3 = usage.summary(dir, { days: 14 });
+  check("缓存合计进了汇总", s3.total.cached === 9088, "实测 " + s3.total.cached);
+  check("汇总里输入/输出仍按原样计", s3.total.prompt === 423 && s3.total.completion === 201);
+  check("最近一轮带着 cached 字段给页面", s3.recent[0].cached === 9088, "实测 " + s3.recent[0].cached);
+  check("显式给 cached 时优先用它", usage.normalize({ prompt: 10, completion: 5, total: 100, cached: 60 }).cached === 60);
+  check("输入输出本来就等于总量时不算缓存", usage.normalize({ prompt: 10, completion: 5 }).cached === 0);
+  usage.clear(dir);
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { }
 
   // ⑦ 接线：三处入口都还在

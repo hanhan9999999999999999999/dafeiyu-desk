@@ -59,11 +59,11 @@ for (const p of pages) {
         turns: [4, 0, 9, 6, 12, 5, 0, 21, 15, 7, 11, 9, 16, 18][i]
       })),
       recent: [
-        { at: Date.now() - 60e3, src: "dsh", label: "DSH 对话", model: "deepseek-flash", prompt: 6120, completion: 980, total: 7100 },
-        { at: Date.now() - 8 * 60e3, src: "api", label: "自定义 API", model: "deepseek-chat", prompt: 2480, completion: 640, total: 3120 },
-        { at: Date.now() - 26 * 60e3, src: "dsh", label: "DSH 对话", model: "deepseek-flash", prompt: 12900, completion: 1740, total: 14640 },
-        { at: Date.now() - 55 * 60e3, src: "dsh", label: "DSH 对话", model: "deepseek-flash · 看屏幕", prompt: 41200, completion: 320, total: 41520 },
-        { at: Date.now() - 96 * 60e3, src: "api", label: "自定义 API", model: "gpt-4o-mini", prompt: 1860, completion: 410, total: 2270 }
+        { at: Date.now() - 60e3, src: "dsh", label: "DSH 对话", model: "deepseek-flash", prompt: 6120, completion: 980, total: 9712, cached: 2612 },
+        { at: Date.now() - 8 * 60e3, src: "api", label: "自定义 API", model: "deepseek-chat", prompt: 2480, completion: 640, total: 3120, cached: 0 },
+        { at: Date.now() - 26 * 60e3, src: "dsh", label: "DSH 对话", model: "deepseek-flash", prompt: 12900, completion: 1740, total: 14640, cached: 0 },
+        { at: Date.now() - 55 * 60e3, src: "dsh", label: "DSH 对话", model: "deepseek-flash · 看屏幕", prompt: 41200, completion: 320, total: 50120, cached: 8600 },
+        { at: Date.now() - 96 * 60e3, src: "api", label: "自定义 API", model: "gpt-4o-mini", prompt: 1860, completion: 410, total: 2270, cached: 0 }
       ],
       ctx: { used: 12900, max: 65536, at: Date.now() - 26 * 60e3 },
       lastAt: Date.now()

@@ -42,7 +42,11 @@
 - 自定义 API 侧：`api:chat` 转发时直接读响应体里的 `usage` 入账。
 - 页面走 `GET /usage/summary`（`server.js` → `usage.summary()`），
   行 20 秒自对一次账；`POST /usage/clear` 清空。
-- 新增 `scripts/test-usage.js`（30 条）：账本行为 16 条 + 接线 14 条。
+- **「输入 + 输出 ≠ 合计」看着像算错了**：DSH 报的 `total_tokens` 把缓存命中的上下文
+  也算进去了（实测 423 + 201 + 9088 = 9712）。现在差额单独记成 `cached`，
+  表格里写成「输入 423 `+9.1k 缓存`」，合计就自洽了；1.6.3 之前记的旧账
+  在读的时候按同样口径补齐，不会显示成 0。
+- 新增 `scripts/test-usage.js`（36 条）：账本行为 22 条 + 接线 14 条。
 
 ### 其它
 

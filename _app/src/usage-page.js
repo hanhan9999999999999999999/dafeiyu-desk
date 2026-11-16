@@ -30,6 +30,7 @@
     const parts = [];
     parts.push(b.turns + " 轮");
     if (b.prompt) parts.push("输入 " + short(b.prompt));
+    if (b.cached) parts.push("缓存 " + short(b.cached));
     if (b.completion) parts.push("输出 " + short(b.completion));
     return parts.join(" · ");
   }
@@ -169,6 +170,15 @@
       const tdP = document.createElement("td");
       tdP.className = "num";
       tdP.textContent = full(t.prompt);
+      if (t.cached) {
+        // DSH 的 total 含缓存命中的上下文；把差额单独标出来，三列才对得上。
+        const em = document.createElement("small");
+        em.style.color = "var(--faint)";
+        em.style.marginLeft = "4px";
+        em.textContent = "+" + short(t.cached) + " 缓存";
+        em.title = "这一轮的上下文里有 " + full(t.cached) + " token 命中缓存";
+        tdP.appendChild(em);
+      }
       const tdC = document.createElement("td");
       tdC.className = "num";
       tdC.textContent = full(t.completion);
