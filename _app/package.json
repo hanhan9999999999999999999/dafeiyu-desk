@@ -1,6 +1,6 @@
 {
   "name": "dafeiyu-desk",
-  "version": "1.6.3",
+  "version": "1.6.4",
   "private": true,
   "description": "大肥鱼 · 桌面 Live2D 伴侣",
   "main": "src/main.js",

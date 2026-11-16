@@ -390,6 +390,20 @@
   .uchart .bar{width:100%; max-width:26px; border-radius:5px 5px 2px 2px; background:linear-gradient(180deg,#5b8cff,#3a5fb8); min-height:2px;}
   .uchart .bar.zero{background:#1d2942;}
   .uchart .cap{font-size:9.5px; color:var(--faint); white-space:nowrap;}
+  /* 上下文卡：左边一个大数字，右边一条占比尺，下面一排最近几轮的走势 */
+  .ctxrow{display:flex; flex-direction:column; gap:8px; margin:2px 0 12px;}
+  .ctxbig{font-size:24px; font-weight:600; letter-spacing:-.5px; color:var(--text); white-space:nowrap;}
+  .ctxbig small{font-size:11px; color:var(--faint); font-weight:400; margin-left:4px;}
+  .ctxmeta{flex:1; min-width:0;}
+  .ctxmeta .track{height:8px; border-radius:4px; background:#1a2436; overflow:hidden;}
+  .ctxmeta .fill{height:100%; background:linear-gradient(90deg,#5b8cff,#7aa2ff); transition:width .25s ease;}
+  .ctxmeta .fill.warn{background:linear-gradient(90deg,#f0a83c,#ffc46b);}
+  .ctxmeta .fill.bad{background:linear-gradient(90deg,#e8455f,#ff7d8f);}
+  .ctxmeta .hint{margin-top:6px;}
+  .ctxbars{display:flex; align-items:flex-end; gap:5px; height:44px; margin-bottom:10px;}
+  .ctxbars .col{flex:1; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; gap:3px; min-width:0;}
+  .ctxbars .bar{width:100%; max-width:18px; border-radius:3px 3px 1px 1px; background:#33507f; min-height:2px;}
+  .ctxbars .cap{font-size:9px; color:var(--faint); white-space:nowrap;}
   .utable{width:100%; border-collapse:collapse; font-size:12px;}
   .utable th{
     text-align:left; font-weight:500; color:var(--faint); font-size:10.5px; letter-spacing:.6px;
@@ -1184,6 +1198,19 @@
         <div class="card">
           <h3>最近 14 天<span class="hint">没说话的那天就是空的</span></h3>
           <div id="usageChart" class="uchart"></div>
+        </div>
+
+        <div class="card">
+          <h3>上下文<span class="hint" id="usageCtxHint">她这一轮读进去多少</span></h3>
+          <div class="ctxrow">
+            <div class="ctxbig" id="usageCtxUsed">—</div>
+            <div class="ctxmeta">
+              <div class="track"><div class="fill" id="usageCtxFill" style="width:0%"></div></div>
+              <div class="hint" id="usageCtxSub">还没有记录 —— 跟她说一句话，这里就有数字了。</div>
+            </div>
+          </div>
+          <div id="usageCtxSeries" class="ctxbars"></div>
+          <p class="hint">上下文是「她这一轮读进模型的历史 + 你这句」的 token 数，每轮重置，不等于累计消耗。上限由模型决定，没报上来时只显示用量。</p>
         </div>
 
         <div class="card">

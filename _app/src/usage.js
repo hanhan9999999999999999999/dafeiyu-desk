@@ -183,6 +183,13 @@ function summary(dir, opt) {
   }
 
   const last = turns.length ? turns[turns.length - 1] : null;
+  // 上下文走势：她每读一轮，上下文就长一截；这个序列比单个数字更能说明「她是不是越聊越重」。
+  const ctxSeries = turns.slice(-12).map((t) => ({
+    at: t.at,
+    used: t.ctxUsed || 0,
+    max: t.ctxMax || 0,
+  }));
+  const ctxMaxSeen = turns.reduce((m, t) => Math.max(m, t.ctxMax || 0), 0);
   return {
     ok: true,
     file: file(dir),
@@ -197,6 +204,8 @@ function summary(dir, opt) {
       cached: t.cached || 0,
     })),
     ctx: last && last.ctxUsed ? { used: last.ctxUsed, max: last.ctxMax, at: last.at } : null,
+    ctxSeries,
+    ctxMax: ctxMaxSeen,
     lastAt: last ? last.at : 0,
   };
 }

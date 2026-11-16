@@ -198,6 +198,61 @@
     box.appendChild(table);
   }
 
+  // 上下文卡：她这一轮读进去多少、离上限还有多远、最近几轮是涨还是落。
+  function renderCtx(s) {
+    const big = $("usageCtxUsed");
+    const sub = $("usageCtxSub");
+    const fill = $("usageCtxFill");
+    const bars = $("usageCtxSeries");
+    if (!big || !sub) return;
+
+    const ctx = s && s.ctx ? s.ctx : null;
+    const used = ctx && ctx.used ? ctx.used : 0;
+    const max = (ctx && ctx.max) || (s && s.ctxMax) || 0;
+
+    if (!used) {
+      big.textContent = "—";
+      sub.textContent = "还没有记录 —— 跟她说一句话，这里就有数字了。";
+      if (fill) { fill.style.width = "0%"; fill.className = "fill"; }
+    } else {
+      big.textContent = short(used);
+      const small = document.createElement("small");
+      small.textContent = max ? " / " + short(max) : " token";
+      big.appendChild(small);
+      const pct = max ? Math.max(1, Math.min(100, Math.round((used / max) * 100))) : 0;
+      if (fill) {
+        fill.style.width = (max ? pct : 100) + "%";
+        fill.className = "fill" + (max && pct >= 90 ? " bad" : max && pct >= 70 ? " warn" : "");
+        if (!max) fill.style.opacity = ".45";
+      }
+      sub.textContent = max
+        ? "占上限 " + pct + "% · " + clockOf(ctx.at) + " 那一轮"
+        : "上限没报上来 · " + clockOf(ctx.at) + " 那一轮";
+    }
+
+    if (!bars) return;
+    const list = Array.isArray(s && s.ctxSeries) ? s.ctxSeries : [];
+    bars.innerHTML = "";
+    if (!list.length) return;
+    const top = Math.max.apply(null, list.map((x) => x.used || 0)) || 1;
+    for (const it of list) {
+      const col = document.createElement("div");
+      col.className = "col";
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      const h = Math.max(it.used ? 3 : 1, Math.round(((it.used || 0) / top) * 34));
+      bar.style.height = h + "px";
+      bar.title = clockOf(it.at) + " · 上下文 " + full(it.used) + " token";
+      const cap = document.createElement("div");
+      cap.className = "cap";
+      cap.textContent = it.used ? short(it.used) : "—";
+      col.appendChild(bar);
+      col.appendChild(cap);
+      bars.appendChild(col);
+    }
+    bars.title = "最近 " + list.length + " 轮的上下文大小（左旧右新）";
+  }
+
   async function load() {
     const refresh = $("usageRefresh");
     if (refresh) refresh.disabled = true;
@@ -215,6 +270,7 @@
       renderCards(s);
       renderSources(s);
       renderChart(s);
+      renderCtx(s);
       renderRecent(s);
       const f = $("usageFile");
       if (f) {

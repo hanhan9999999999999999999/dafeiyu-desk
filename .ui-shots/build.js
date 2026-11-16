@@ -66,6 +66,19 @@ for (const p of pages) {
         { at: Date.now() - 96 * 60e3, src: "api", label: "自定义 API", model: "gpt-4o-mini", prompt: 1860, completion: 410, total: 2270, cached: 0 }
       ],
       ctx: { used: 12900, max: 65536, at: Date.now() - 26 * 60e3 },
+      ctxSeries: [
+        { at: Date.now() - 300 * 60e3, used: 4200, max: 65536 },
+        { at: Date.now() - 260 * 60e3, used: 6100, max: 65536 },
+        { at: Date.now() - 210 * 60e3, used: 7400, max: 65536 },
+        { at: Date.now() - 160 * 60e3, used: 9100, max: 65536 },
+        { at: Date.now() - 120 * 60e3, used: 8300, max: 65536 },
+        { at: Date.now() - 96 * 60e3, used: 11200, max: 65536 },
+        { at: Date.now() - 55 * 60e3, used: 41000, max: 65536 },
+        { at: Date.now() - 26 * 60e3, used: 12900, max: 65536 },
+        { at: Date.now() - 8 * 60e3, used: 9800, max: 65536 },
+        { at: Date.now() - 60e3, used: 12400, max: 65536 }
+      ],
+      ctxMax: 65536,
       lastAt: Date.now()
     };
     Object.defineProperty(window, "fetch", {

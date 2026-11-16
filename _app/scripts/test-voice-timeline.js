@@ -129,6 +129,14 @@ async function main() {
   check("drain() 等首句播完", drain.includes("await pcmPlayer.wait()"));
   check("drain() 用时间轴续播而不是每句 new Audio", drain.includes("await player.push(new Uint8Array(buf))"));
 
+  // ⑥ 音频秒数要单独记：at - startedAt 会把解码等待算进去，日志会虚高。
+  check("播放器记了真正排进去的音频秒数", src.includes("audioSec += buf.duration;"));
+  check("audioDuration 对外可见", src.includes("get audioDuration() { return audioSec; }"));
+  check("日志报的是 audioDuration", src.includes("player.audioDuration.toFixed(2)"));
+
+  // ⑦ 上下文被系统挂起过时，排片前要先等 resume()——否则第一块会被排到「过去」。
+  check("排片前等 resume()", src.includes('(c.state === "running" ? null : c.resume().catch(() => { }))'));
+
   console.log("\n结果：" + pass + " 通过、" + fail + " 失败");
   process.exit(fail ? 1 : 0);
 }

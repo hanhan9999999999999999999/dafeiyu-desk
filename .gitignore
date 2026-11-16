@@ -107,3 +107,4 @@ DeepSeek Live2D Model/psd/
 .voice-fast-backup.txt
 **/__pycache__/
 .git-commit-msg.txt
+.ui-shots/.edge-profile/

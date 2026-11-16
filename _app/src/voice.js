@@ -1383,8 +1383,12 @@
       // 首声按「真正开始出声」的那一刻报，而不是按排进时间轴的那一刻报。
       const lag = player.firstStartIn();
       if (onFirst) setTimeout(onFirst, Math.max(0, Math.round(lag * 1000)));
+      const tTail = Date.now();
       try { await readerTask; } catch (e) { }
       await player.end();
+      // 这条日志是「第一句有没有被掐断」的现场证据：
+      // 播完用时应该 ≈ 音频时长。以前 end() 提前返回时这里是 0.2s 对 3.4s。
+      log("首句播完 " + ((Date.now() - tTail) / 1000).toFixed(2) + "s（音频 " + player.audioDuration.toFixed(2) + "s，ctx " + ((mouthCtx && mouthCtx.state) || "无") + "）");
       if (pcmPlayer === player) pcmPlayer = null;
       stopMouth();
       log("飞鱼播完 " + got + " 段（时间轴）");
@@ -1637,6 +1641,7 @@
     let settle = null;
     let startedAt = 0;
     let firstAt = 0;         // 第一块真正开口的那一刻（ctx 时间）
+    let audioSec = 0;        // 真正排进时间轴的音频秒数（不含解码等待、不含空隙）
     const allDone = new Promise((r) => { settle = r; });
 
     function finish() {
@@ -1669,6 +1674,7 @@
         src.start(startAt);
         if (!firstAt) firstAt = startAt;
         at = startAt + buf.duration;
+        audioSec += buf.duration;
         sources.push(src);
         src.onended = () => {
           try { src.disconnect(); } catch (e) { }
@@ -1684,11 +1690,19 @@
     return {
       get closed() { return ended || dead; },
       get duration() { return at - (startedAt || 0); },
+      // 这条时间轴上到底有多少秒音频。日志里该报这个：
+      // at - startedAt 会把「解码等待」也算进去，数字会虚高。
+      get audioDuration() { return audioSec; },
       // 串行解码：块必须按到达顺序排进去，否则先解完的后排、顺序就乱了。
       push(bytes) {
         if (dead) return chain;
         startedAt = startedAt || c.currentTime;
-        chain = chain.then(() => schedule(bytes));
+        chain = chain
+          // 上下文被系统挂起过（长时间没出声、或者程序在最前面时被切后台）时，
+          // resume() 是异步的：不 await 就排片，currentTime 还冻着，第一块会被排到
+          // 「过去的时刻」，playback 于是慢半拍甚至不响。这里先确保真的在跑。
+          .then(() => (c.state === "running" ? null : c.resume().catch(() => { })))
+          .then(() => schedule(bytes));
         return chain;
       },
       firstStartIn() { return firstAt ? Math.max(0, firstAt - c.currentTime) : 0; },
