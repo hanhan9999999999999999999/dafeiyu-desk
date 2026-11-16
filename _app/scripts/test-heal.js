@@ -1,0 +1,49 @@
+// 自愈回归：这两条是用户真碰到的
+//  ① 桥接「进程在、端口不答话」时以前只记一句话，永远不自愈 → 发出去的话没回复；
+//  ② 外面手动起的引擎明明在跑，界面写「未启动」，可「首声」指标却有数；
+//     点「一键启动」什么也不发生（只 ensure 进程、不预热模型）。
+// 这里把两边的关键实现钉住，改坏了立刻红。
+const fs = require("fs");
+const path = require("path");
+
+const APP = path.resolve(__dirname, "..");
+const read = (p) => fs.readFileSync(path.join(APP, p), "utf8");
+
+let pass = 0;
+let fail = 0;
+function ok(name) { pass += 1; console.log("  ✓ " + name); }
+function bad(name, why) { fail += 1; console.log("  ✗ " + name + (why ? " —— " + why : "")); }
+function has(src, needle, name) {
+  if (src.includes(needle)) ok(name || needle);
+  else bad(name || needle, "没找到：" + String(needle).slice(0, 60));
+}
+
+const main = read("src/main.js");
+const feiyu = read("engine/feiyu.mjs");
+const server = read("src/server.js");
+const renderer = read("src/settings-renderer.js");
+
+console.log("桥接自愈");
+has(main, "async function waitMiniListening(", "有 waitMiniListening()：等端口真的应答");
+has(main, "const up = await waitMiniListening(12000);", "启动后最多等 12 秒再报结果");
+has(main, "miniAnswering", "状态里区分「进程在」和「端口在答话」");
+has(main, "自带桥接起了进程，但", "起不来时有明确原因，不是一句「还没答话」");
+has(main, "自带桥接进程在但不应答，收掉重起", "miniStart 遇到卡死的先收掉再起");
+has(main, "没应答，重启自带桥接", "bridgeEnsure 遇到没应答会重启一次");
+has(main, "重起后仍然没应答", "重起后仍不通要如实说，不对用户报喜");
+has(main, "}, 45 * 1000);", "巡检间隔 45 秒（以前 90 秒，卡住要等太久）");
+
+console.log("引擎状态");
+has(feiyu, "let external = false;", "记录「外面启动的引擎」");
+has(feiyu, "running: !!(child || external),", "running 表示「有引擎在应答」，不只管子进程");
+has(feiyu, "external: !!external,", "状态里带 external，界面才能说清谁在跑");
+has(feiyu, "export async function snapshot()", "有 snapshot()：先真探一次再报状态");
+has(server, "await f.snapshot()", "feiyu_status 走 snapshot，不用旧快照");
+has(feiyu, "if (!ready) {", "一键启动在未就绪时真的预热");
+has(feiyu, "const w = await warm(", "启动路径里调 warm()");
+has(feiyu, "只卸载模型，不结束那个进程", "关引擎遇到别人的进程只卸载模型");
+has(renderer, "j.external ?", "设置页会标出「这个进程不是本程序启动的」");
+
+console.log("");
+console.log(`结果：${pass} 通过 ${fail} 失败`);
+process.exit(fail ? 1 : 0);

@@ -287,14 +287,57 @@ function miniNodeBin() {
   return process.execPath;
 }
 
+function miniUrl() {
+  return "http://127.0.0.1:" + MINI_PORT;
+}
+
+// 「进程在」和「端口真的答话」是两件事。以前只看前者，于是卡死的那个桥
+// 会让巡检每 90 秒重复一句「还没答话」，用户那边一直是「发出去没回复」。
+let miniAnswering = false;
+let miniLastOkAt = 0;
+
 function miniStatus() {
   return {
     running: !!(miniProc && !miniProc.killed),
+    answering: !!miniAnswering,
+    lastOkAt: miniLastOkAt || 0,
     port: MINI_PORT,
-    url: "http://127.0.0.1:" + MINI_PORT,
+    url: miniUrl(),
     script: MINI_SCRIPT(),
     error: miniLastError || "",
   };
+}
+
+/** 直接探某个地址的 /api/health。通了顺手记一次「它答话了」。 */
+async function probeUrl(u, ms) {
+  try {
+    const r = await fetch(String(u).replace(/\/+$/, "") + "/api/health", {
+      cache: "no-store",
+      signal: AbortSignal.timeout(ms || 2500),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j && j.ok ? j : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** 等自带桥真的开始收请求。spawn 完立刻宣布「已启动」是错的：
+ *  自检 100 毫秒后就打过去，必然报「还没答话」，用户看到的就是「没接上」。 */
+async function waitMiniListening(ms) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < (ms || 12000)) {
+    const j = await probeUrl(miniUrl(), 1200);
+    if (j) {
+      miniAnswering = true;
+      miniLastOkAt = Date.now();
+      return j;
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  miniAnswering = false;
+  return null;
 }
 
 // ── 桥接自愈（1.5.0）──────────────────────────────────────────────
@@ -412,12 +455,21 @@ async function bridgeEnsure(opt) {
   const before = String(S.get().bridgeUrl || "").trim() || BRIDGE_DEFAULT;
   out.base = bridgePointToMini();
   out.switched = out.base !== before.replace(/\/+$/, "");
-  // 起完再探一次：进程起来了但端口还没通也算没通，别对用户报喜。
-  const ok = await probeBridge().catch(() => false);
-  out.ok = !!ok;
+  // 进程起来了不等于端口在答话。以前这里只记一句「还没答话」就放着，
+  // 巡检每 90 秒重复同一句话，用户那边永远是「发出去没回复」。
+  let j = await probeUrl(out.base, 2500);
+  if (!j) {
+    log("[bridge] " + out.base + " 没应答，重启自带桥接");
+    miniStop();
+    st = await miniStart();
+    out.mini = st;
+    j = await probeUrl(out.base, 4000);
+  }
+  const ok = !!(j && (j.token || readBridgeToken()));
+  out.ok = ok;
   out.note = ok
     ? (out.switched ? "外部桥没在跑，已自动改用自带桥接：" + out.base : "用自带桥接：" + out.base)
-    : "自带桥接进程在，但 " + out.base + " 还没答话";
+    : "自带桥接重起后仍然没应答：" + out.base + (miniLastError ? "（" + miniLastError + "）" : "");
   return out;
 }
 
@@ -498,7 +550,19 @@ async function probeBridge() {
 }
 
 async function miniStart() {
-  if (miniProc && !miniProc.killed) return miniStatus();
+  // 进程在、端口不一定在答话。卡死的那个必须先收掉，否则永远停在
+  // 「进程在但没应答」，巡检只会每 90 秒重复这句话，不会自愈。
+  if (miniProc && !miniProc.killed) {
+    const j = await probeUrl(miniUrl(), 1500);
+    if (j) {
+      miniAnswering = true;
+      miniLastOkAt = Date.now();
+      miniFixBridgeUrl();
+      return miniStatus();
+    }
+    log("[bridge] 自带桥接进程在但不应答，收掉重起");
+    miniStop();
+  }
   const script = MINI_SCRIPT();
   if (!fs.existsSync(script)) {
     miniLastError = "找不到 bridge/mini-bridge.mjs";
@@ -516,6 +580,7 @@ async function miniStart() {
       windowsHide: true,
     });
     miniLastError = "";
+    miniAnswering = false;
     miniProc.stdout.on("data", (d) => log("[bridge] " + String(d).trim().slice(0, 200)));
     miniProc.stderr.on("data", (d) => {
       const t = String(d).trim();
@@ -525,14 +590,26 @@ async function miniStart() {
     miniProc.on("close", (code) => {
       if (code !== 0) miniLastError = "桥接退出（code=" + code + "）";
       miniProc = null;
+      miniAnswering = false;
       // 不是我们主动关的（退出时 miniStop 会先置 appQuitting），就安排一次重拉。
       miniScheduleRestart("exit code=" + code);
     });
-    log("[main] 自带桥接已启动，端口 " + MINI_PORT);
-    miniFixBridgeUrl();
+    log("[main] 自带桥接已拉起，端口 " + MINI_PORT + "，等它开始应答");
   } catch (e) {
     miniLastError = String((e && e.message) || e);
     log("[main] 自带桥接起不来: " + miniLastError);
+    return miniStatus();
+  }
+  // 等端口真的收请求，再报喜、再改地址。原来这两步在 spawn 之后立刻做，
+  // 于是每次开机日志里都留一句「还没答话」，用户以为桥没起来。
+  const up = await waitMiniListening(12000);
+  if (up) {
+    miniLastError = "";
+    log("[main] 自带桥接就绪：" + miniUrl());
+    bridgePointToMini();
+  } else {
+    miniLastError = "自带桥接起了进程，但 " + miniUrl() + " 12 秒没应答";
+    log("[bridge!] " + miniLastError);
   }
   return miniStatus();
 }
@@ -5520,7 +5597,7 @@ app.whenReady().then(async () => {
         .then((r) => log("[main] 桥接自检：" + (r.ok ? "通" : "不通") + " · " + r.note))
         .catch((e) => log("[main] 桥接自检失败: " + e));
     }, 3000);
-    // 之后每 90 秒看一眼：桥的进程可能被安全软件、任务管理器或者它自己的崩溃带走，
+    // 之后每 45 秒看一眼：桥的进程可能被安全软件、任务管理器或者它自己的崩溃带走，
     // 以前这种情况只会一路「连不上」到用户重启程序。现在它自己会回来。
     if (!bridgeWatchTimer) {
       bridgeWatchTimer = setInterval(() => {
@@ -5528,7 +5605,7 @@ app.whenReady().then(async () => {
         bridgeEnsure({ quiet: true })
           .then((r) => { if (!r.ok) log("[bridge] 巡检出问题：" + r.note); })
           .catch(() => { });
-      }, 90 * 1000);
+      }, 45 * 1000);
       try { bridgeWatchTimer.unref(); } catch (e) { }
     }
   }

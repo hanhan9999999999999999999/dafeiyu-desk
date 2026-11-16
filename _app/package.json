@@ -1,6 +1,6 @@
 {
   "name": "dafeiyu-desk",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "private": true,
   "description": "大肥鱼 · 桌面 Live2D 伴侣",
   "main": "src/main.js",
@@ -20,7 +20,7 @@
     "verify:packs": "node scripts/verify-packs.js",
     "verify:src": "node scripts/verify-src.js",
     "verify:server": "node scripts/verify-server.js",
-    "test": "node scripts/test-pet.js && node scripts/test-settings.js && node scripts/test-menu.js && node scripts/test-update.js && node scripts/test-log.js && node scripts/test-packs.js && node scripts/test-packs-http.js && node scripts/test-diag.js && node scripts/test-settings-schema.js && node scripts/test-tray.js && node scripts/test-curve.js && node scripts/test-ui-bindings.js && node scripts/test-voiceerr.js && node scripts/test-chatfile.js && node scripts/test-tmp.js && node scripts/test-voice-perf.js",
+    "test": "node scripts/test-pet.js && node scripts/test-settings.js && node scripts/test-menu.js && node scripts/test-update.js && node scripts/test-log.js && node scripts/test-packs.js && node scripts/test-packs-http.js && node scripts/test-diag.js && node scripts/test-settings-schema.js && node scripts/test-tray.js && node scripts/test-curve.js && node scripts/test-ui-bindings.js && node scripts/test-voiceerr.js && node scripts/test-chatfile.js && node scripts/test-tmp.js && node scripts/test-voice-perf.js && node scripts/test-heal.js",
     "verify:ui": "node scripts/test-ui.js",
     "verify": "node scripts/verify-src.js && node scripts/verify-packs.js && node scripts/verify-pack.js && node scripts/verify-server.js && npm test && node scripts/audit-settings.js && node scripts/test-persist.js && node scripts/audit-network.js && node scripts/audit-privacy.js && node scripts/audit-listeners.js",
     "release:bundle": "node scripts/release-bundle.js",
@@ -79,7 +79,8 @@
     "test:voice-perf": "node scripts/test-voice-perf.js",
     "test:globals": "node scripts/test-globals.js",
     "test:drag": "node scripts/test-drag-clamp.js",
-    "test:settings-bom": "node scripts/test-settings-bom.js"
+    "test:settings-bom": "node scripts/test-settings-bom.js",
+    "test:heal": "node scripts/test-heal.js"
   },
   "devDependencies": {
     "electron-builder": "^25.1.8"

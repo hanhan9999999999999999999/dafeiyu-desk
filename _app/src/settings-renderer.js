@@ -1437,7 +1437,8 @@ async function checkFeiyuEngine() {
     if (!j.ready) {
       engDotCls("busy");
       engTitle("飞鱼", "装载中", "busy");
-      engSub("引擎进程起来了，模型正在进显存" + (j.device ? "（" + j.device + "）" : "") + "，约 25 秒。就绪之前的请求会自动等它，不会说话说一半。");
+      engSub("引擎进程起来了，模型正在进显存" + (j.device ? "（" + j.device + "）" : "") + "，约 25 秒。就绪之前的请求会自动等它，不会说话说一半。"
+        + (j.external ? "这个进程不是本程序启动的，关掉本程序它也会留着。" : ""));
       engNotice("装载中：这会儿说话会慢，但不会静音，也不会换声音。", "warn");
       return;
     }
@@ -1445,7 +1446,8 @@ async function checkFeiyuEngine() {
     engDotCls("ok");
     engTitle("飞鱼", "就绪", "ok");
     engSub("引擎在跑" + (j.device ? " · " + j.device : "") + (j.style ? " · " + j.style : "")
-      + "，随时能开口。闲置不动会按下面的时长释放显存。");
+      + "，随时能开口。闲置不动会按下面的时长释放显存。"
+      + (j.external ? "（这个进程不是本程序启动的）" : ""));
     engNotice("引擎就绪：这几句就是飞鱼本人的声音。", "ok");
     if (els.engFallbackNote) {
       els.engFallbackNote.className = "hint";

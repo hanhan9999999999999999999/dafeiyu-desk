@@ -51,6 +51,8 @@ export const PKG = process.env.FEIYU_PKG || path.join(HOME, 'models', 'FeiyuVoic
 const REPO = process.env.FEIYU_REPO || path.join(HOME, 'cosyvoice');
 
 let child = null;
+// 8895 上有引擎在应答，但不是这个程序拉起来的（上一次没退干净的、或者外面手动起的）
+let external = false;
 let idleTimer = null;
 let starting = null;
 let lastErr = '';
@@ -113,7 +115,12 @@ export function checkHome(home) {
 export function status() {
   return {
     available: available(),
-    running: !!child,
+    // running：真的有个引擎在 8895 上应答（含「外部启动的那个」）。
+    // owned：是不是这个程序拉起来的子进程。
+    // 以前只报 owned，于是外部的引擎明明连着、指标都有，界面还写「未启动」。
+    running: !!(child || external),
+    owned: !!child,
+    external: !!external,
     ready,
     device,
     style: curStyle,
@@ -127,6 +134,27 @@ export function status() {
     idle: idleInfo(),
     perf: lastPerf,
   };
+}
+
+/** 状态快照：先真探一次 /health 再报。
+ *  status() 只是「上次见过的样子」，外面手动起的引擎不会经过 ensure()，
+ *  于是界面会写「未启动」而指标却有数——这就是用户报的那条。
+ *  设置页每 3 秒问一次，探一次 600ms 的本地请求很便宜。 */
+export async function snapshot() {
+  try {
+    const h = await ping(600);
+    if (h) {
+      ready = !!h.ready;
+      device = h.device || device;
+      styles = h.styles || styles;
+      curStyle = h.style || curStyle;
+      external = !child;
+    } else if (!child) {
+      external = false;
+      ready = false;
+    }
+  } catch (e) { }
+  return status();
 }
 
 /** 待机信息：设置页要显示「还有 X 分钟释放」，就得知道上次用到是什么时候。 */
@@ -178,6 +206,8 @@ async function ensure(refDir) {
     device = alive.device || device;
     styles = alive.styles || styles;
     curStyle = alive.style || curStyle;
+    // 应答的不是我们拉起的那个进程：记下来，界面才能说清「谁在跑」
+    external = !child;
     return;
   }
 
@@ -208,6 +238,7 @@ async function ensure(refDir) {
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    external = false;   // 从这一刻起，8895 上应答的就是我们自己拉起来的进程
     child.stdout.on('data', (b) => log(String(b).trim()));
     child.stderr.on('data', (b) => {
       const s = String(b).trim();
@@ -217,6 +248,7 @@ async function ensure(refDir) {
       log('退出', code);
       child = null;
       ready = false;
+      external = false;
     });
 
     // 最多等 25 秒让 HTTP 起来。模型是懒加载的，服务本身几秒就能收请求。
@@ -269,6 +301,14 @@ function touchIdle() {
 export async function start(opts = {}) {
   await ensure(opts.refDir);
   touchIdle();
+  // 进程起来 ≠ 模型进了显存。设置页那个「一键启动」的本意是「现在让我能立刻听见」，
+  // 所以这里真的预热一次；已经就绪的话就是一次很便宜的 /warm。
+  // 之前只 ensure 不预热：外部已经把服务跑起来的情况下，点按钮什么都不会发生，
+  // 界面一直停在「装载中」，看起来就像按钮坏了。
+  if (!ready) {
+    const w = await warm({ style: opts.style, timeout: opts.timeout });
+    if (w && w.ok === false) lastErr = String(w.error || lastErr || "预热失败");
+  }
   try {
     const h = await ping(600);
     if (h) {
@@ -276,6 +316,7 @@ export async function start(opts = {}) {
       device = h.device || device;
       styles = h.styles || styles;
       curStyle = h.style || curStyle;
+      external = !child;
     }
   } catch { }
   return status();
@@ -470,6 +511,11 @@ export function stop() {
   if (child) {
     try { child.kill(); } catch {}
     child = null;
+    external = false;
+  } else if (external) {
+    // 8895 上那个不是我们拉起来的进程：只让它把模型挪出显存，不替别人结束进程。
+    fetch(`${BASE}/unload`, { method: 'POST' }).catch(() => {});
+    log('外部飞鱼服务：只卸载模型，不结束那个进程');
   }
   ready = false;
 }

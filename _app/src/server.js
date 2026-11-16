@@ -146,7 +146,9 @@ function startServer(opts) {
           try {
             const f = await engines.feiyu();
             if (f && f.setIdleMs) f.setIdleMs(idleMsFromSettings());
-            const st = (f && f.status) ? f.status() : {};
+            // snapshot 会先真探一次 /health：外面手动起的引擎不经过 ensure()，
+            // 用纯快照会一直报「未启动」，可指标却已经有数。
+            const st = (f && f.snapshot) ? await f.snapshot() : ((f && f.status) ? f.status() : {});
             res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
             res.end(JSON.stringify(Object.assign({ ok: true }, st)));
           } catch (e) {

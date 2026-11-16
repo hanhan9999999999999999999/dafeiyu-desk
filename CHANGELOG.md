@@ -1,5 +1,47 @@
 # 更新日志
 
+## 1.6.1 — 2026-11-16
+
+两个「明明在跑却说没在跑」的毛病，都是主人验收时当场撞见的。
+
+### 桥接：进程活着、端口不答话，以前就一直卡着
+
+发出去的话没回复，日志里却是这句循环了五分钟：
+`[bridge] 巡检出问题：自带桥接进程在，但 http://127.0.0.1:8898 还没答话`。
+原来的自愈逻辑只判断「我的子进程还在不在」（`miniStatus()` 的
+`running: !!(miniProc && !miniProc.killed)`），进程在就算好；`bridgeEnsure()` 探到端口不答话
+之后**只写一句 note，什么也不做**，于是每 90 秒重复同一个结论，永不自愈。
+
+- 新增 `waitMiniListening(12000)`：spawn 之后**等端口真的应答**再报「就绪」，不再抢跑
+  （原来 spawn 完立刻写「自带桥接已启动」，比端口 listen 早约 100ms，每次开机都留一句假故障）。
+- `bridgeEnsure()` 探到没应答 → `miniStop()` 收掉 → `miniStart()` 重起 → 再探 4 秒；
+  仍然不通就如实写「自带桥接重起后仍然没应答」，不再报喜。
+- 巡检间隔 90 秒 → **45 秒**：卡住之后最多 45 秒自愈，不用重开程序。
+- `miniStatus()` 现在分开说「进程在」和「端口在答话」（`answering` / `lastOkAt`）。
+
+### 引擎：外面起的 cosy 明明在跑，界面写「未启动」
+
+`engine/feiyu.mjs` 的 `status().running` 同样是 `!!child` —— 只认本程序拉起的子进程。
+手动起的引擎于是 `running:false`（界面「未启动」），但 `ping()` 早把 `perf` 写进了
+`lastPerf`，所以「首声 1.74 秒」照样显示 —— 看起来自相矛盾。点「一键启动」也没反应：
+`start()` 只 `ensure()`，进程在就直接返回，**不预热模型**，界面永远停在「装载中」。
+
+- 新增 `external` 标记：`ensure()` 发现引擎已在应答但不是自己拉起的，就记下来；
+  子进程退出时清掉。`status()` 变成 `running: !!(child || external)`，并带 `owned` / `external`。
+- 新增 `snapshot()`：先真探一次 `/health` 再报状态，`/engine/feiyu_status` 改走它 ——
+  外面起的引擎立刻显示「在跑」。
+- `start()` 在未就绪时真的 `warm()`，把模型装进显存：实测**一键启动 23 秒后
+  `ready=true device=cuda:0`**（以前这一步什么都不会发生）。
+- `stop()` 遇到不是自己拉起的引擎只 `POST /unload` 卸载模型，**不结束那个进程**。
+- 设置页会补一句「这个进程不是本程序启动的，关掉本程序它也会留着」。
+
+### 校验
+
+- 新增 `scripts/test-heal.js`（17 条）：把上面两处自愈的关键实现钉住，已接进 `test` 链尾。
+- 实测：重启后 `[main] 自带桥接已拉起，端口 8898，等它开始应答` → **323ms 后**
+  `[main] 自带桥接就绪` → `桥接自检：通`；外部引擎下 `/engine/feiyu_status` 回
+  `running:true owned:false external:true`；`POST /engine/feiyu_start` 23s 后 `ready=true device=cuda:0`。
+
 ## 1.6.0 — 2026-11-15
 
 这一版只做一件事：**让她开口变快，而且不是靠砍质量换的**。飞鱼（CosyVoice3）原来的首声

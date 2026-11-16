@@ -78,7 +78,7 @@ ok("perf 里有 audioSec（这次合成了多少秒音频）", /"audioSec"\s*:/.
 ok("perf 里有 cachedSentences（几句是缓存秒回的）", /"cachedSentences"\s*:/.test(py));
 ok("/health 把 perf 带出来", /"perf"\s*:\s*STATE\.get\("perf"\)/.test(py), "health 没带 perf");
 ok("feiyu.mjs 记 lastPerf", /let lastPerf = null/.test(mjs) && /lastPerf = \{/.test(mjs));
-ok("feiyu.mjs 的 status() 带 perf", /status\(\)[\s\S]{0,400}perf:\s*lastPerf/.test(mjs));
+ok("feiyu.mjs 的 status() 带 perf", /export function status\([\s\S]{0,600}perf:\s*lastPerf/.test(mjs));
 ok("设置页有「首声」这一列", /id="engFactFirst"/.test(html));
 ok("设置页有「合成速度」这一列", /id="engFactRtf"/.test(html));
 ok("首声分档上色（2 秒绿 / 3 秒黄）", /2000/.test(srender) && /3000/.test(srender) && /engPerf/.test(srender));
